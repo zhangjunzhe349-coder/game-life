@@ -86,8 +86,13 @@
         ${list().map(manageRow).join('')}
       </details>` : ''}`;
 
-    // 管理区趋势图（按需绘制）
-    el.querySelectorAll('#attr-manage canvas.spark').forEach((c, i) => sparkline(c, list()[i]));
+    // 管理区趋势图：details 展开后才测量宽度，因此展开时再绘制一次
+    const mg = el.querySelector('#attr-manage');
+    if (mg) {
+      const paint = () => mg.querySelectorAll('canvas.spark').forEach((c, i) => sparkline(c, list()[i]));
+      mg.addEventListener('toggle', () => { if (mg.open) requestAnimationFrame(paint); });
+      if (mg.open) requestAnimationFrame(paint);
+    }
   }
 
   function sparkline(canvas, a) {
