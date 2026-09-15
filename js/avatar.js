@@ -156,19 +156,21 @@
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(38, w / hgt, 0.1, 50);
 
-    scene.add(new THREE.HemisphereLight(0xdfe4ff, 0xe9e6f5, 1.0));
-    const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(2.2, 3.4, 2.6); scene.add(key);
-    const rim = new THREE.DirectionalLight(0x8f7bff, 0.45); rim.position.set(-2.4, 1.6, -2); scene.add(rim);
+    // 暗场打光：半球冷光 + 主光 + 青色轮廓光，人物从黑底中浮出
+    scene.add(new THREE.HemisphereLight(0x9fb4d8, 0x0a0c12, 0.85));
+    const key = new THREE.DirectionalLight(0xffffff, 1.05); key.position.set(2.2, 3.4, 2.6); scene.add(key);
+    const rim = new THREE.DirectionalLight(0x4cc9f0, 0.55); rim.position.set(-2.4, 1.6, -2); scene.add(rim);
+    const fill = new THREE.DirectionalLight(0x3ce8b0, 0.25); fill.position.set(0.6, 0.8, -2.6); scene.add(fill);
 
     const ground = new THREE.Mesh(
       new THREE.CircleGeometry(0.85, 40),
-      new THREE.MeshStandardMaterial({ color: 0xe9e6f7, roughness: 0.95 })
+      new THREE.MeshStandardMaterial({ color: 0x0e1118, roughness: 0.95 })
     );
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.85, 0.9, 48),
-      new THREE.MeshBasicMaterial({ color: 0x5b4df0, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: 0x3ce8b0, transparent: true, opacity: 0.45, side: THREE.DoubleSide })
     );
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.002;
     scene.add(ring);
@@ -356,6 +358,7 @@
   }
 
   GL.hooks.push(() => { render(); });
-  GL.initAvatar = function () { init(); render(); bind(); };
+  GL.initAvatar = function () { init(); };                       // 只建场景，控制面板单独渲染
+  GL.renderAvatarCtrl = function () { render(); bind(); };
   GL.rebuildAvatar = function () { if (initialized && modelGroup) build(); };
 })();

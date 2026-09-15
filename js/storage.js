@@ -180,6 +180,23 @@
     return { level: L, total, into: total - cum, need, pct: Math.min(100, Math.round((total - cum) / need * 100)) };
   };
 
+  /* ---------- 生命刻度：统一计算，顶栏与生命页共用 ---------- */
+  GL.lifeInfo = function () {
+    const L = GL.state.life;
+    const [y, m, d] = String(L.birthDate).split('-').map(Number);
+    const birth = new Date(y || 1996, (m || 1) - 1, d || 1);
+    const now = new Date();
+    let ageY = now.getFullYear() - birth.getFullYear();
+    const anniv = new Date(now.getFullYear(), birth.getMonth(), birth.getDate());
+    if (anniv > now) ageY--;
+    const lastBd = new Date(now.getFullYear() - (anniv > now ? 1 : 0), birth.getMonth(), birth.getDate());
+    const ageD = Math.floor((now - lastBd) / 86400e3);
+    const livedW = Math.max(0, Math.floor((Date.now() - birth.getTime()) / (7 * 86400e3)));
+    const totalW = L.expectancy * 52;
+    const remainW = Math.max(0, totalW - livedW);
+    return { birth, ageY: Math.max(0, ageY), ageD, livedW, totalW, remainW, pct: Math.min(100, (livedW / totalW) * 100) };
+  };
+
   /* ---------- 属性等级 ---------- */
   GL.attrLevel = function (attr) {
     const levels = (attr.levels || []).slice().sort((a, b) => b.min - a.min);

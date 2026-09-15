@@ -1,108 +1,130 @@
-/* ============ Game Life · 生理状态追踪（饮水 + 自定义字段） ============ */
+/* ============ Game Life · 生理状态（HUD 右翼） ============
+   饮水进度 + 距上次喝水 + 全自定义字段打卡，围绕 3D 形象实时呈现
+   ============================================================ */
 (function () {
   'use strict';
 
+  let addOpen = false;                      // 「添加字段」表单展开状态
+
   function P() { return GL.state.physiology; }
+  function find(id) { return P().fields.find((f) => f.id === id); }
 
   function todayMl() {
     const key = GL.todayKey(Date.now());
     return P().hydration.logs.filter((l) => GL.todayKey(l.t) === key).reduce((s, l) => s + l.ml, 0);
   }
 
-  function ringSvg(total, goal) {
+  function ring(total, goal) {
     const pct = Math.min(1, goal ? total / goal : 0);
-    const R = 52, C = 2 * Math.PI * R;
+    const R = 46, C = 2 * Math.PI * R;
     return `<div class="ring-wrap">
-      <svg width="128" height="128" viewBox="0 0 128 128">
-        <circle cx="64" cy="64" r="${R}" fill="none" stroke="#262d45" stroke-width="10"/>
-        <circle cx="64" cy="64" r="${R}" fill="none" stroke="url(#hydrog)" stroke-width="10"
-          stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/>
-        <defs><linearGradient id="hydrog" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#7c5cff"/>
+      <svg width="112" height="112" viewBox="0 0 112 112" role="img" aria-label="今日饮水 ${total} 毫升">
+        <circle cx="56" cy="56" r="${R}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/>
+        <circle cx="56" cy="56" r="${R}" fill="none" stroke="url(#hg)" stroke-width="9"
+          stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"
+          transform="rotate(-90 56 56)"/>
+        <defs><linearGradient id="hg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#4cc9f0"/><stop offset="1" stop-color="#3ce8b0"/>
         </linearGradient></defs>
       </svg>
-      <div class="ring-txt"><b>${total}</b><small>/ ${goal} ml</small>
-        <small style="color:#22d3ee">${Math.round(pct * 100)}%</small></div>
+      <div class="ring-txt">
+        <b>${total}</b><small>/ ${goal} ml</small><em>${Math.round(pct * 100)}%</em>
+      </div>
     </div>`;
   }
 
-  function fieldCard(f) {
-    let ops = '';
-    if (f.type === 'number') {
-      ops = `<input type="number" step="any" data-fnum="${f.id}" placeholder="数值" style="width:90px">
-             <button class="btn mini primary" data-frec="${f.id}">打卡</button>`;
-    } else if (f.type === 'toggle') {
-      ops = `<button class="btn mini ${f.value ? 'primary' : ''}" data-ftoggle="${f.id}">
-               ${f.value === null ? '打卡' : f.value ? '✅ 是' : '⬜ 否'} · 记录</button>`;
-    } else {
-      ops = `<input type="text" data-ftext="${f.id}" placeholder="记录内容" style="flex:1 1 110px">
-             <button class="btn mini primary" data-frec="${f.id}">打卡</button>`;
-    }
-    const hist = (f.history || []).slice(-10).reverse()
-      .map((h) => `<li>${GL.fmtClock(h.t)} — ${GL.esc(h.v)}${f.unit ? ' ' + GL.esc(f.unit) : ''}</li>`).join('');
-    return `<div class="stat-item" data-fid="${f.id}">
-      <div class="stat-main">
-        <div class="stat-name">${GL.esc(f.name)}</div>
-        <div class="stat-val">${f.value === null || f.value === undefined || f.value === '' ? '待记录' : GL.esc(f.value) + (f.unit ? ' ' + GL.esc(f.unit) : '')}</div>
-        <div class="stat-time">上次打卡：${GL.fmtRel(f.lastAt)}</div>
+  function fieldRow(f) {
+    const empty = f.value === null || f.value === undefined || f.value === '';
+    const ops = f.type === 'toggle'
+      ? `<button class="btn mini ${f.value === true ? 'primary' : ''}" data-ftoggle="${f.id}">
+           ${empty ? '打卡' : f.value ? '✅ 是' : '⬜ 否'}
+         </button>`
+      : `<input type="${f.type === 'number' ? 'number' : 'text'}" step="any"
+           data-fval="${f.id}" placeholder="${f.type === 'number' ? '数值' : '记录内容'}"
+           aria-label="${GL.esc(f.name)}">
+         <button class="btn mini primary" data-frec="${f.id}">打卡</button>`;
+    return `<div class="field-row" data-fid="${f.id}">
+      <div class="field-top">
+        <span class="field-name">${GL.esc(f.name)}</span>
+        <span class="field-val ${empty ? 'idle' : ''}">${empty ? '待记录' : GL.esc(f.value) + (f.unit ? ' ' + GL.esc(f.unit) : '')}</span>
       </div>
-      <div class="stat-ops">${ops}
-        <button class="btn mini danger" data-fdel="${f.id}" title="删除该字段">✕</button></div>
-      ${hist ? `<details class="hist" style="flex-basis:100%"><summary>历史记录（${(f.history || []).length} 条）</summary><ul>${hist}</ul></details>` : ''}
+      <div class="field-time">上次打卡 ${GL.fmtRel(f.lastAt)}</div>
+      <div class="field-ops">${ops}</div>
+    </div>`;
+  }
+
+  function manageRow(f) {
+    return `<div class="edit-box" data-fid="${f.id}">
+      <div class="card-head" style="margin:0;padding:0 0 6px;border:0">
+        <span class="card-title" style="font-size:14px">${GL.esc(f.name)}</span>
+        <button class="btn mini danger" data-fdel="${f.id}">删除字段</button>
+      </div>
+      <details class="hist"><summary>历史记录（${(f.history || []).length} 条）</summary>
+        <ul>${(f.history || []).slice(-14).reverse()
+          .map((h) => `<li>${GL.fmtClock(h.t)} — ${GL.esc(h.v)}${f.unit ? ' ' + GL.esc(f.unit) : ''}</li>`).join('') || '<li>暂无记录</li>'}</ul>
+      </details>
     </div>`;
   }
 
   function render() {
-    const el = document.getElementById('panel-body');
+    const el = document.getElementById('wing-body');
     if (!el) return;
     const hy = P().hydration;
     const total = todayMl();
     const last = hy.logs.length ? hy.logs[hy.logs.length - 1].t : null;
+    const todayCount = hy.logs.filter((l) => GL.todayKey(l.t) === GL.todayKey(Date.now())).length;
 
     el.innerHTML = `
-    <div class="card">
-      <div class="card-head"><span class="card-title">💧 饮水状态</span>
-        <button class="btn mini ${hy.remindOn ? 'primary' : ''}" id="hy-remind">🔔 提醒 ${hy.remindOn ? '开' : '关'}</button></div>
-      <div class="hydro-top">
-        ${ringSvg(total, hy.goal)}
-        <div class="hydro-info">
-          <div class="big">⏱ 距上次喝水：${last ? GL.fmtRel(last) : '今天还没喝过'}</div>
-          <div class="muted">今日已喝 <b style="color:#22d3ee">${total}</b> ml · 目标 ${hy.goal} ml</div>
-          <div class="muted">共 ${(hy.logs || []).length} 条记录</div>
-          <div class="quick-btns">
-            <button class="btn mini" data-drink="100">+100</button>
-            <button class="btn mini" data-drink="250">+250 ☕</button>
-            <button class="btn mini" data-drink="500">+500 🍾</button>
-            <input type="number" id="hy-custom" placeholder="自定义ml" style="width:96px">
-            <button class="btn mini primary" id="hy-add">记录</button>
-            <button class="btn mini ghost" id="hy-undo" title="撤销上一条">↩</button>
-          </div>
-          <div class="quick-btns">
-            <label class="dim" style="display:flex;align-items:center;gap:6px">每日目标
-              <input type="number" id="hy-goal" value="${hy.goal}" style="width:84px"> ml</label>
-          </div>
-        </div>
+      <div class="wing-head">
+        <span class="wing-title">生理状态</span>
+        <span class="wing-note">今日 ${total} / ${hy.goal} ml</span>
       </div>
-      ${last ? `<details class="hist"><summary>今日喝水明细</summary><ul>${hy.logs.filter((l) => GL.todayKey(l.t) === GL.todayKey(Date.now())).reverse().map((l) => `<li>${GL.fmtClock(l.t)} — ${l.ml} ml</li>`).join('') || '<li>今天还没有记录</li>'}</ul></details>` : ''}
-    </div>
 
-    <div class="card">
-      <div class="card-head"><span class="card-title">🩺 自定义生理状态</span><span class="card-hint">自由增删 · 手动打卡</span></div>
-      <div class="stat-list">${P().fields.map(fieldCard).join('') || '<span class="dim">还没有自定义字段</span>'}</div>
-      <div class="edit-box">
-        <div class="form-row">
-          <input type="text" id="f-name" placeholder="字段名，如 睡眠时长">
-          <select id="f-type"><option value="number">数值</option><option value="toggle">是否</option><option value="text">文本</option></select>
-          <input type="text" id="f-unit" placeholder="单位(可选)" style="flex:0 1 90px">
-          <button class="btn primary mini" id="f-add">＋添加</button>
+      <div class="hydro">
+        ${ring(total, hy.goal)}
+        <div class="hydro-side">
+          <div class="kv"><span>距上次喝水</span><b class="amber">${last ? GL.fmtRel(last) : '未记录'}</b></div>
+          <div class="kv"><span>今日次数</span><b class="hot">${todayCount}</b></div>
+          <div class="kv"><span>累计记录</span><b>${(hy.logs || []).length}</b></div>
+          <div class="kv"><span>每日目标</span><b><input type="number" id="hy-goal" value="${hy.goal}"
+            style="width:72px;min-height:26px;padding:0 6px;text-align:right" aria-label="每日饮水目标"> ml</b></div>
         </div>
-        <div class="dim">💡 预留智能硬件同步接口：所有记录均为标准时间戳结构，后续可直接对接自动写入。</div>
       </div>
-    </div>`;
+
+      <div class="chips">
+        <button class="chip" data-drink="100">+100</button>
+        <button class="chip" data-drink="250">+250 ☕</button>
+        <button class="chip" data-drink="500">+500 🍾</button>
+        <button class="chip" id="hy-undo" title="撤销上一条">↩ 撤销</button>
+        <button class="chip ${hy.remindOn ? 'equipped' : ''}" id="hy-remind">🔔 ${hy.remindOn ? '提醒开' : '提醒关'}</button>
+      </div>
+      <div class="field-ops" style="margin-top:8px">
+        <input type="number" id="hy-custom" placeholder="自定义 ml" aria-label="自定义饮水量">
+        <button class="btn mini primary" id="hy-add">记录</button>
+      </div>
+
+      <div class="wing-head" style="margin-top:12px">
+        <span class="wing-title">自定义指标</span>
+        <span class="wing-note">${P().fields.length} 项</span>
+      </div>
+      ${P().fields.map(fieldRow).join('') || '<span class="dim">还没有自定义指标</span>'}
+
+      <button class="btn mini wide" id="f-add-toggle" aria-expanded="${addOpen}">${addOpen ? '× 收起' : '＋ 新增指标'}</button>
+      ${addOpen ? `<div class="xp-add" id="f-add-box">
+        <input type="text" id="f-name" placeholder="指标名，如 睡眠时长" aria-label="指标名">
+        <select id="f-type" style="min-height:34px">
+          <option value="number">数值</option><option value="toggle">是否</option><option value="text">文本</option>
+        </select>
+        <input type="text" id="f-unit" placeholder="单位" style="width:70px" aria-label="单位">
+        <button class="btn mini primary" id="f-add">添加</button>
+      </div>` : ''}
+      ${P().fields.length ? `<details class="hist" id="f-manage"><summary>管理指标 · 删除 / 历史</summary>
+        ${P().fields.map(manageRow).join('')}
+      </details>` : ''}`;
   }
 
   function bind() {
-    const el = document.getElementById('panel-body');
+    const el = document.getElementById('wing-body');
     if (!el || el.dataset.bound) return;
     el.dataset.bound = '1';
 
@@ -113,55 +135,57 @@
       if (d) { drink(Number(d.dataset.drink)); return; }
       if (e.target.id === 'hy-add') {
         const v = Number(el.querySelector('#hy-custom').value);
-        if (v > 0) drink(v); else GL.toast('请输入喝水量', 'err');
+        if (v > 0) drink(v); else GL.toast('请输入饮水量', 'err');
         return;
       }
       if (e.target.id === 'hy-undo') {
-        if (hy.logs.length) { const l = hy.logs.pop(); GL.toast('已撤销上一条：' + l.ml + ' ml'); GL.changed(); }
+        if (hy.logs.length) { const l = hy.logs.pop(); GL.toast('已撤销 ' + l.ml + ' ml'); GL.changed(); }
+        else GL.toast('没有可撤销的记录', 'err');
         return;
       }
-      if (e.target.id === 'hy-goal') return;
       if (e.target.id === 'hy-remind') {
         hy.remindOn = !hy.remindOn;
         if (hy.remindOn && 'Notification' in window && Notification.permission !== 'granted') {
           Notification.requestPermission();
         }
-        GL.toast(hy.remindOn ? '喝水提醒已开启（页面打开期间有效）' : '喝水提醒已关闭');
+        GL.toast(hy.remindOn ? '喝水提醒已开启（页面打开时生效）' : '喝水提醒已关闭', 'ok');
+        GL.changed();
+        return;
+      }
+      if (e.target.id === 'f-add-toggle') { addOpen = !addOpen; render(); return; }
+      if (e.target.id === 'f-add') {
+        const name = (el.querySelector('#f-name').value || '').trim();
+        const type = el.querySelector('#f-type').value;
+        const unit = el.querySelector('#f-unit').value.trim();
+        if (!name) { GL.toast('先填写指标名', 'err'); return; }
+        P().fields.push({ id: GL.uid(), name, unit, type, value: null, lastAt: null, history: [] });
+        addOpen = false;
+        GL.toast('已添加「' + name + '」', 'ok');
         GL.changed();
         return;
       }
 
-      // 自定义字段
       const frec = e.target.closest('[data-frec]');
       if (frec) {
-        const f = P().fields.find((x) => x.id === frec.dataset.frec);
-        const box = frec.closest('.stat-item');
-        const inp = box.querySelector(f.type === 'number' ? '[data-fnum]' : '[data-ftext]');
-        const v = f.type === 'number' ? Number(inp.value) : inp.value.trim();
-        if (f.type === 'number' ? !(v > 0 || v <= 0) || inp.value === '' : !v) { GL.toast('先填写数值', 'err'); return; }
-        recordField(f, v);
+        const f = find(frec.dataset.frec);
+        const inp = frec.closest('.field-row').querySelector('[data-fval]');
+        if (!f || !inp) return;
+        const raw = inp.value.trim();
+        if (!raw) { GL.toast('先填写记录内容', 'err'); return; }
+        recordField(f, f.type === 'number' ? Number(raw) : raw);
         return;
       }
       const ft = e.target.closest('[data-ftoggle]');
       if (ft) {
-        const f = P().fields.find((x) => x.id === ft.dataset.ftoggle);
-        recordField(f, !(f.value === true));
+        const f = find(ft.dataset.ftoggle);
+        if (f) recordField(f, !(f.value === true));
         return;
       }
       const fd = e.target.closest('[data-fdel]');
       if (fd) {
-        if (!confirm('确定删除该字段及其全部历史记录吗？')) return;
+        const f = find(fd.dataset.fdel);
+        if (!confirm('确定删除「' + (f ? f.name : '') + '」及其全部历史吗？')) return;
         P().fields = P().fields.filter((x) => x.id !== fd.dataset.fdel);
-        GL.changed();
-        return;
-      }
-      if (e.target.id === 'f-add') {
-        const name = el.querySelector('#f-name').value.trim();
-        const type = el.querySelector('#f-type').value;
-        const unit = el.querySelector('#f-unit').value.trim();
-        if (!name) { GL.toast('先填写字段名', 'err'); return; }
-        P().fields.push({ id: GL.uid(), name, unit, type, value: null, lastAt: null, history: [] });
-        GL.toast('已添加「' + name + '」');
         GL.changed();
       }
     });
@@ -173,8 +197,13 @@
       }
     });
     el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.target.id === 'hy-custom' || e.target.id === 'f-name')) {
-        el.querySelector(e.target.id === 'hy-custom' ? '#hy-add' : '#f-add').click();
+      if (e.key !== 'Enter') return;
+      if (e.target.id === 'hy-custom') el.querySelector('#hy-add').click();
+      if (e.target.id === 'f-name') el.querySelector('#f-add').click();
+      if (e.target.dataset && e.target.dataset.fval) {
+        const f = find(e.target.dataset.fval);
+        const raw = e.target.value.trim();
+        if (f && raw) recordField(f, f.type === 'number' ? Number(raw) : raw);
       }
     });
   }
@@ -194,22 +223,22 @@
     GL.changed();
   }
 
-  /* 喝水提醒检查（app.js 定时调用） */
+  /* 喝水提醒（app.js 定时调用） */
   GL.checkHydration = function () {
     const hy = P().hydration;
     if (!hy.remindOn) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const logs = hy.logs;
-    const last = logs.length ? logs[logs.length - 1].t : null;
+    const last = hy.logs.length ? hy.logs[hy.logs.length - 1].t : null;
     if (!last) return;
-    if (Date.now() - last > (hy.remindMin || 90) * 60000) {
-      if (!GL._hyReminded || Date.now() - GL._hyReminded > (hy.remindMin || 90) * 60000) {
-        GL._hyReminded = Date.now();
-        try { new Notification('💧 该喝水啦', { body: '距离上次喝水已经超过 ' + (hy.remindMin || 90) + ' 分钟了' }); } catch (e) { /* ignore */ }
-      }
+    const gap = (hy.remindMin || 90) * 60000;
+    if (Date.now() - last > gap && (!GL._hyReminded || Date.now() - GL._hyReminded > gap)) {
+      GL._hyReminded = Date.now();
+      try {
+        new Notification('💧 该喝水啦', { body: '距离上次喝水已经超过 ' + (hy.remindMin || 90) + ' 分钟了' });
+      } catch (e) { /* ignore */ }
     }
   };
 
-  GL.hooks.push(() => { render(); });
+  GL.hooks.push(render);
   GL.renderBody = function () { render(); bind(); };
 })();

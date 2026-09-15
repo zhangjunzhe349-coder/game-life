@@ -1,58 +1,101 @@
-/* ============ Game Life · 技能经验值成长系统 ============ */
+/* ============ Game Life · 技能经验值 ============
+   极简操作：每项技能一个「＋」，加多少由你自己评判
+   完整展示：等级 / 本级进度 / 累计经验 / 下一级需求 / 成长记录
+   ============================================================ */
 (function () {
   'use strict';
 
+  let addingFor = null;      // 当前展开加经验行的技能 id
+  let lastXp = 10;           // 记住上次填写的 XP，减少重复输入
+
+  function list() { return GL.state.skills; }
+  function find(id) { return list().find((s) => s.id === id); }
+
+  function logLine(s, l) {
+    const act = (s.actions || []).find((x) => x.id === l.actionId);
+    const what = l.note ? GL.esc(l.note) : (act ? GL.esc(act.name) : '自定义');
+    return `<li>${GL.fmtClock(l.t)} — ${what} <span class="gold">+${l.xp} XP</span></li>`;
+  }
+
   function card(s) {
     const lv = GL.skillLevel(s);
-    const logs = (s.logs || []).slice(-6).reverse()
-      .map((l) => {
-        const act = s.actions.find((x) => x.id === l.actionId);
-        return `<li>${GL.fmtClock(l.t)} — ${GL.esc(act ? act.name : '行动')} <span class="gold">+${l.xp} XP</span></li>`;
-      }).join('');
-    return `<div class="card" data-sid="${s.id}">
+    const open = addingFor === s.id;
+    const logs = (s.logs || []).slice(-8).reverse().map((l) => logLine(s, l)).join('');
+    return `<div class="skill" data-sid="${s.id}">
       <div class="skill-top">
-        <span class="skill-name">${s.emoji || '🎯'} ${GL.esc(s.name)}</span>
+        <span class="skill-emoji">${s.emoji || '🎯'}</span>
+        <span class="skill-name">${GL.esc(s.name)}</span>
         <span class="skill-lv">Lv.${lv.level}</span>
       </div>
-      <div class="xp-bar"><div style="width:${lv.pct}%"></div></div>
-      <div class="xp-txt">${lv.into} / ${lv.need} XP → Lv.${lv.level + 1} · 累计 ${s.xp} XP</div>
-      <div class="action-chips">
-        ${s.actions.map((act) => `<button class="action-chip" data-act="${act.id}">${GL.esc(act.name)}<b>+${act.xp}</b></button>`).join('')}
+      <div class="xp-bar"><i style="width:${lv.pct}%"></i></div>
+      <div class="xp-line">
+        <span>本级 <b>${lv.into}</b> / ${lv.need} XP</span>
+        <em>下一级 Lv.${lv.level + 1}</em>
       </div>
-      <div class="edit-box">
-        <div class="form-row">
-          <input type="text" data-act-name placeholder="新行动名称" style="flex:2 1 130px">
-          <input type="number" data-act-xp placeholder="XP" min="1" style="flex:1 1 64px">
-          <button class="btn mini primary" data-act-add>＋行动</button>
-        </div>
-        <div class="form-row">
-          <label class="dim" style="display:flex;align-items:center;gap:6px">每级基础XP
-            <input type="number" data-xp-per value="${s.xpPerLevel}" min="1" style="width:76px"></label>
-          <button class="btn mini danger" data-skill-del>删除技能</button>
-        </div>
-        ${s.actions.length ? `<details class="hist"><summary>管理行动（点击 ✕ 删除）</summary><div class="chips" style="margin-top:6px">
-          ${s.actions.map((act) => `<button class="chip" data-act-del="${act.id}">${GL.esc(act.name)} +${act.xp}<span class="x">✕</span></button>`).join('')}
-        </div></details>` : ''}
+      <div class="skill-foot">
+        <span class="skill-total">累计 <b>${s.xp}</b> XP</span>
+        <button class="add-btn ${open ? 'open' : ''}" data-add="${s.id}"
+          aria-label="给 ${GL.esc(s.name)} 加经验" title="加经验">${open ? '×' : '＋'}</button>
       </div>
+      ${open ? `<div class="xp-add">
+        <label for="xp-${s.id}">XP</label>
+        <input type="number" id="xp-${s.id}" value="${lastXp}" min="1" step="1" data-xp-in>
+        <input type="text" placeholder="做了什么（可选）" data-xp-note aria-label="做了什么">
+        <button class="btn mini primary" data-xp-ok="${s.id}">✓ 加经验</button>
+      </div>` : ''}
       ${logs ? `<details class="hist"><summary>成长记录（${(s.logs || []).length} 条）</summary><ul>${logs}</ul></details>` : ''}
     </div>`;
+  }
+
+  function manage() {
+    return `<details class="hist" style="margin-top:4px">
+      <summary>管理技能 · 升级曲线 / 删除</summary>
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+        ${list().map((s) => `<div class="form-row" data-sid="${s.id}">
+          <span class="dim" style="flex:1 1 140px">${s.emoji || '🎯'} ${GL.esc(s.name)}</span>
+          <label class="dim" style="display:flex;align-items:center;gap:6px;letter-spacing:.06em">每级
+            <input type="number" data-xp-per value="${s.xpPerLevel}" min="1" style="width:74px"> XP</label>
+          <button class="btn mini danger" data-skill-del="${s.id}">删除</button>
+        </div>`).join('')}
+      </div>
+    </details>`;
   }
 
   function render() {
     const el = document.getElementById('panel-skills');
     if (!el) return;
+    const total = list().reduce((s, k) => s + (k.xp || 0), 0);
     el.innerHTML = `
-      ${GL.state.skills.map(card).join('')}
       <div class="card">
-        <div class="card-head"><span class="card-title">＋ 创建新技能</span><span class="card-hint">行动 → 经验值 → 升级</span></div>
-        <div class="form-row">
-          <input type="text" id="s-emoji" placeholder="emoji" style="flex:0 1 76px" maxlength="4">
-          <input type="text" id="s-name" placeholder="技能名，如 写作能力">
-          <input type="number" id="s-xp" value="100" min="1" title="每级基础XP" style="flex:0 1 90px">
-          <button class="btn primary mini" id="s-add">创建</button>
+        <div class="card-head">
+          <span class="card-title">🎯 技能经验值</span>
+          <span class="card-hint">${list().length} 项 · 累计 ${total} XP</span>
         </div>
-        <div class="dim" style="margin-top:6px">升级所需经验逐级递增：Lv2 需 100，Lv3 需 300，Lv4 需 600……（按每级基础 100 计）</div>
+        <div class="skill-grid">
+          ${list().map(card).join('') || '<span class="dim">还没有技能，先在下方创建</span>'}
+        </div>
+        <div class="edit-box">
+          <div class="form-row">
+            <input type="text" id="s-emoji" placeholder="emoji" style="flex:0 1 72px" maxlength="4" aria-label="图标">
+            <input type="text" id="s-name" placeholder="技能名，如 写作能力" style="flex:2 1 160px" aria-label="技能名">
+            <input type="number" id="s-xp" value="100" min="1" title="每级基础XP" style="flex:0 1 92px" aria-label="每级基础经验">
+            <button class="btn mini primary" id="s-add">＋ 创建技能</button>
+          </div>
+          <div class="dim">升级所需经验逐级递增：Lv2 → 100，Lv3 → 300，Lv4 → 600……（按每级基础 100 计）</div>
+        </div>
+        ${list().length ? manage() : ''}
       </div>`;
+  }
+
+  function gain(s, xp, note) {
+    const before = GL.skillLevel(s).level;
+    s.xp += xp;
+    (s.logs = s.logs || []).push({ t: Date.now(), actionId: null, xp, note: note || '' });
+    addingFor = null;
+    GL.changed();
+    const after = GL.skillLevel(s).level;
+    if (after > before) GL.toast(`🎉 ${s.name} 升级！Lv.${before} → Lv.${after}`, 'lvlup');
+    else GL.toast(`+${xp} XP · ${s.emoji || ''}${s.name}${note ? ' · ' + note : ''}`, 'ok');
   }
 
   function bind() {
@@ -60,73 +103,66 @@
     if (!el || el.dataset.bound) return;
     el.dataset.bound = '1';
 
-    function gainXp(s, xp, label) {
-      const before = GL.skillLevel(s).level;
-      s.xp += xp;
-      (s.logs = s.logs || []).push({ t: Date.now(), actionId: label.id || null, xp });
-      const after = GL.skillLevel(s).level;
-      GL.changed();
-      if (after > before) {
-        GL.toast(`🎉 ${s.name} 升级！Lv.${before} → Lv.${after}`, 'lvlup');
-      } else {
-        GL.toast(`+${xp} XP · ${s.emoji || ''}${s.name}`, 'ok');
-      }
-    }
-
     el.addEventListener('click', (e) => {
-      const cardEl = e.target.closest('[data-sid]');
-      const s = cardEl ? GL.state.skills.find((x) => x.id === cardEl.dataset.sid) : null;
-
-      const act = e.target.closest('[data-act]');
-      if (act && s) {
-        const a = s.actions.find((x) => x.id === act.dataset.act);
-        if (a) gainXp(s, a.xp, a);
+      // 展开 / 收起加经验行
+      const add = e.target.closest('[data-add]');
+      if (add) {
+        addingFor = addingFor === add.dataset.add ? null : add.dataset.add;
+        render();
+        const inp = el.querySelector('#xp-' + add.dataset.add);
+        if (inp) { inp.focus(); inp.select(); }
         return;
       }
-      if (!s) {
-        if (e.target.id === 's-add') {
-          const name = el.querySelector('#s-name').value.trim();
-          const emoji = el.querySelector('#s-emoji').value.trim() || '🎯';
-          const per = Math.max(1, Number(el.querySelector('#s-xp').value) || 100);
-          if (!name) { GL.toast('先填写技能名', 'err'); return; }
-          GL.state.skills.push({ id: GL.uid(), name, emoji, xp: 0, xpPerLevel: per, actions: [], logs: [] });
-          GL.toast('技能「' + name + '」已创建，去添加行动吧');
-          GL.changed();
-        }
+      // 确认加经验
+      const ok = e.target.closest('[data-xp-ok]');
+      if (ok) {
+        const s = find(ok.dataset.xpOk);
+        const box = ok.closest('.xp-add');
+        const xp = Math.round(Number(box.querySelector('[data-xp-in]').value));
+        const note = box.querySelector('[data-xp-note]').value.trim();
+        if (!(xp > 0)) { GL.toast('请输入大于 0 的经验值', 'err'); return; }
+        lastXp = xp;
+        if (s) gain(s, xp, note);
         return;
       }
-      if (e.target.dataset.actAdd !== undefined) {
-        const name = cardEl.querySelector('[data-act-name]').value.trim();
-        const xp = Number(cardEl.querySelector('[data-act-xp]').value);
-        if (!name || !(xp > 0)) { GL.toast('填写行动名和 XP', 'err'); return; }
-        s.actions.push({ id: GL.uid(), name, xp });
-        GL.toast('行动已添加');
+      // 新建技能
+      if (e.target.id === 's-add') {
+        const name = (el.querySelector('#s-name').value || '').trim();
+        const emoji = el.querySelector('#s-emoji').value.trim() || '🎯';
+        const per = Math.max(1, Number(el.querySelector('#s-xp').value) || 100);
+        if (!name) { GL.toast('先填写技能名', 'err'); return; }
+        list().push({ id: GL.uid(), name, emoji, xp: 0, xpPerLevel: per, actions: [], logs: [] });
+        GL.toast('技能「' + name + '」已创建', 'ok');
         GL.changed();
-      } else if (e.target.dataset.actDel !== undefined) {
-        if (!confirm('确定删除该行动吗？历史经验值保留。')) return;
-        s.actions = s.actions.filter((x) => x.id !== e.target.dataset.actDel);
-        GL.changed();
-      } else if (e.target.dataset.skillDel !== undefined) {
-        if (!confirm('确定删除技能「' + s.name + '」及其全部成长记录吗？')) return;
-        GL.state.skills = GL.state.skills.filter((x) => x.id !== s.id);
+        return;
+      }
+      // 删除技能
+      const del = e.target.closest('[data-skill-del]');
+      if (del) {
+        const s = find(del.dataset.skillDel);
+        if (!confirm('确定删除技能「' + (s ? s.name : '') + '」及其全部成长记录吗？')) return;
+        GL.state.skills = list().filter((x) => x.id !== del.dataset.skillDel);
         GL.changed();
       }
     });
 
     el.addEventListener('change', (e) => {
-      if (e.target.dataset.xpPer !== undefined) {
-        const cardEl = e.target.closest('[data-sid]');
-        const s = GL.state.skills.find((x) => x.id === cardEl.dataset.sid);
-        if (s) { s.xpPerLevel = Math.max(1, Number(e.target.value) || 100); GL.changed(); }
-      }
+      if (e.target.dataset.xpPer === undefined) return;
+      const row = e.target.closest('[data-sid]');
+      const s = row ? find(row.dataset.sid) : null;
+      if (s) { s.xpPerLevel = Math.max(1, Number(e.target.value) || 100); GL.changed(); }
     });
+
     el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.target.id === 's-name' || e.target.dataset.actName !== undefined)) {
-        el.querySelector(e.target.id === 's-name' ? '#s-add' : '[data-act-add]').click();
+      if (e.key !== 'Enter') return;
+      if (e.target.id === 's-name') { el.querySelector('#s-add').click(); return; }
+      if (e.target.dataset.xpIn !== undefined || e.target.dataset.xpNote !== undefined) {
+        const box = e.target.closest('.xp-add');
+        if (box) box.querySelector('[data-xp-ok]').click();
       }
     });
   }
 
-  GL.hooks.push(() => { render(); });
+  GL.hooks.push(render);
   GL.renderSkills = function () { render(); bind(); };
 })();
