@@ -292,18 +292,19 @@
     const c = shoeItem.color, dark = shade(c, -0.3), light = shade(c, 0.22);
     const legX = px(s.hipW * 0.52);
     const aR = px(s.ankleR);
-    const w = aR * 1.7;                 // 鞋长（自踝向前后铺开）
+    const w = aR * 2.3;                 // 鞋长（自踝向前后铺开）—— 略放大，让鞋头朝向清晰可辨
     const ySole = Y.foot;               // 鞋底着地
     const yCollar = Y.ankle - 34;       // 鞋口（踝上一段，压住裤脚）
 
     for (const sx of [-legX, legX]) {
       const dir = sx > 0 ? 1 : -1;      // 鞋头朝外微张
+      const toe = w * 1.55;             // 鞋头外张量：明显外八但不夸张
       /* 鞋身：鞋口 → 后跟 → 鞋底 → 鞋头 → 鞋面 */
       const d = close(curve([
         [CX + sx - aR * 1.02, yCollar, CX + sx - w * 0.52, yCollar + 6, CX + sx - w * 0.56, Y.ankle + 6],
         [CX + sx - w * 0.58, ySole - 18, CX + sx - w * 0.5, ySole, CX + sx - w * 0.2, ySole],
-        [CX + sx + dir * w * 0.66, ySole, CX + sx + dir * w * 1.0, ySole - 8, CX + sx + dir * w * 1.02, ySole - 22],
-        [CX + sx + dir * w * 0.98, ySole - 40, CX + sx + dir * w * 0.62, ySole - 52, CX + sx + dir * w * 0.2, ySole - 50],
+        [CX + sx + dir * toe * 0.64, ySole, CX + sx + dir * toe, ySole - 8, CX + sx + dir * toe * 1.02, ySole - 22],
+        [CX + sx + dir * toe * 0.98, ySole - 40, CX + sx + dir * toe * 0.62, ySole - 52, CX + sx + dir * toe * 0.2, ySole - 50],
         [CX + sx + aR * 0.5, ySole - 48, CX + sx + aR * 0.92, Y.ankle - 40, CX + sx + aR * 1.02, yCollar]
       ]));
       el('path', { d, fill: c }, L);
@@ -311,15 +312,15 @@
       el('path', {
         d: close(curve([
           [CX + sx - w * 0.58, ySole - 16, CX + sx - w * 0.5, ySole, CX + sx - w * 0.2, ySole],
-          [CX + sx + dir * w * 0.66, ySole, CX + sx + dir * w * 1.0, ySole - 8, CX + sx + dir * w * 1.02, ySole - 20],
-          [CX + sx + dir * w * 0.9, ySole - 14, CX + sx + dir * w * 0.4, ySole - 8, CX + sx - w * 0.1, ySole - 8],
+          [CX + sx + dir * toe * 0.64, ySole, CX + sx + dir * toe, ySole - 8, CX + sx + dir * toe * 1.02, ySole - 20],
+          [CX + sx + dir * toe * 0.9, ySole - 14, CX + sx + dir * toe * 0.4, ySole - 8, CX + sx - w * 0.1, ySole - 8],
           [CX + sx - w * 0.42, ySole - 8, CX + sx - w * 0.54, ySole - 12, CX + sx - w * 0.58, ySole - 16]
         ])),
         fill: dark
       }, L);
       /* 鞋面高光 */
       el('path', {
-        d: `M ${CX + sx - w * 0.24} ${yCollar + 8} L ${CX + sx + dir * w * 0.5} ${Y.ankle + 4} L ${CX + sx + dir * w * 0.56} ${ySole - 40}`,
+        d: `M ${CX + sx - w * 0.24} ${yCollar + 8} L ${CX + sx + dir * toe * 0.5} ${Y.ankle + 4} L ${CX + sx + dir * toe * 0.56} ${ySole - 40}`,
         stroke: rgba(light, 0.45), 'stroke-width': 3, fill: 'none', 'stroke-linecap': 'round'
       }, L);
     }
@@ -358,8 +359,12 @@
       /* 上装：躯干轮廓外扩后裁剪出衣摆 */
       const topC = topItem.color;
       const long = /卫衣|外套|夹克|大衣|hoodie|jacket|coat/i.test(topItem.name);
-      /* 衣摆：常规款盖到胯下（与裤腰重叠，不留缝隙），长款到大腿中段 */
+      /* 衣摆：常规款盖到胯下（与裤腰重叠，不留缝隙），长款到大腿中段。
+         下探量要比躯干肤色路径的底部更低，否则腹部中线会露出一条肤色细缝
+         —— torso 的底部在 Y.crotch + 44，故 hemDrop 需 > 44。 */
+      const hemDrop = 58;
       const hemY = long ? Y.hip + 150 : Y.crotch + 10;
+      const hemLow = long ? hemY + 8 : Y.crotch + hemDrop;
       const pad = 7;
       /* 上装轮廓：直接由躯干轮廓外扩 pad 得到，保证与身体同形不出现台阶。
          肩部额外走一点圆角，避免布料在斜方肌上折出尖角。 */
@@ -370,17 +375,18 @@
         [CX - sh - pad, Y.shoulder + 26, CX - sh - pad, Y.shoulder + 52, CX - sh * 0.98 - pad, Y.chest - 30],
         [CX - ch * 1.02 - pad, Y.chest, CX - ch * 0.985 - pad, Y.chest + 48, CX - ch * 0.9 - pad - 2, Y.waist - 30],
         [CX - wa * 1.02 - pad - 3, Y.waist, CX - wa - pad - 4, Y.waist + 22, CX - wa * 1.06 - pad - 4, hemY - 44],
-        [CX - hi * 1.0 - pad, hemY - 16, CX - hi - pad + 2, hemY, CX - hi * 0.4, hemY + 8],
+        [CX - hi * 1.0 - pad, hemY - 16, CX - hi - pad + 2, hemY, CX - hi * 0.4, hemLow],
         /* 右半：摆 → 腰 → 胸 → 三角肌 → 斜方肌 → 颈根 */
-        [CX + hi * 0.4, hemY + 8, CX + hi + pad - 2, hemY, CX + hi * 1.0 + pad, hemY - 16],
+        [CX + hi * 0.4, hemLow, CX + hi + pad - 2, hemY, CX + hi * 1.0 + pad, hemY - 16],
         [CX + wa * 1.06 + pad + 4, hemY - 44, CX + wa + pad + 4, Y.waist + 22, CX + wa * 1.02 + pad + 3, Y.waist],
         [CX + ch * 0.9 + pad + 2, Y.waist - 30, CX + ch * 0.985 + pad, Y.chest + 48, CX + ch * 1.02 + pad, Y.chest],
         [CX + sh * 0.98 + pad, Y.chest - 30, CX + sh + pad, Y.shoulder + 52, CX + sh + pad, Y.shoulder + 26],
         [CX + sh * 0.92 + pad * 0.3, Y.shoulder + 6, CX + sh * 0.68, Y.shoulder - 8, CX + nk * 1.9, yNeckBase],
-        /* 领口内圈：贴颈一圈 */
-        [CX + nk * 1.06, Y.neck + 2, CX + nk * 0.98, Y.jaw - 4, CX + nk * 0.96, Y.jaw - 4],
-        [CX - nk * 0.96, Y.jaw - 4, CX - nk * 0.98, Y.jaw - 4, CX - nk * 1.06, Y.neck + 2],
-        [CX - nk * 1.9, yNeckBase, CX - nk * 1.9, yNeckBase, CX - nk * 1.9, yNeckBase]
+        /* 领口内圈：贴颈一圈，走「U 形圆领」而非直线横切。
+           注意下沿要留在颌下足够距离，否则会顶到下巴、被头部盖住。 */
+        [CX + nk * 1.34, Y.neck + 2, CX + nk * 1.16, Y.jaw + 18, CX + nk * 0.72, Y.jaw + 8],
+        [CX + nk * 0.34, Y.jaw - 2, CX - nk * 0.34, Y.jaw - 2, CX - nk * 0.72, Y.jaw + 8],
+        [CX - nk * 1.16, Y.jaw + 18, CX - nk * 1.34, Y.neck + 2, CX - nk * 1.9, yNeckBase]
       ]));
       // 脖子（先画，被衣领压住）
       el('path', {

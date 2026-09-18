@@ -17,12 +17,36 @@ const ok = [];
 const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
 const localScripts = scripts.filter((s) => !/^https?:/.test(s));
 
-const EXPECT = ['js/storage.js', 'js/portrait.js', 'js/physiology.js',
+const EXPECT = ['js/storage.js', 'js/avatar.js', 'js/portrait.js', 'js/physiology.js',
   'js/attributes.js', 'js/skills.js', 'js/life.js', 'js/app.js'];
 if (JSON.stringify(localScripts) !== JSON.stringify(EXPECT)) {
   problems.push(`脚本顺序不符\n    实际：${localScripts.join(' → ')}\n    期望：${EXPECT.join(' → ')}`);
 } else {
   ok.push(`脚本顺序正确（${localScripts.length} 个本地脚本，storage 最先、app 最后）`);
+}
+
+/* ---------- 1b. app.js 调用的 GL.* 是否都有提供者（v1.4.2 事故盲区） ----------
+   事故复盘：index.html 曾漏加载 js/avatar.js，而 app.js 要调 GL.initAvatar()，
+   于是 start() 抛异常中断，后面的 reveal() 没跑，所有 .rv 元素永久 opacity:0，
+   整页白屏 —— 而当时的本脚本全绿，因为它只查「脚本清单对不对」，
+   不查「app.js 要用的函数有没有人提供」。这条检查就是补这个洞。 */
+const appSrc = fs.readFileSync(path.join(ROOT, 'js', 'app.js'), 'utf8');
+const appNeeds = [...new Set([...appSrc.matchAll(/\bGL\.([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]))];
+
+// 收集所有 js 文件里对 GL.xxx 的赋值/定义
+const provided = new Set();
+for (const f of fs.readdirSync(path.join(ROOT, 'js')).filter((x) => x.endsWith('.js'))) {
+  const src = fs.readFileSync(path.join(ROOT, 'js', f), 'utf8');
+  for (const m of src.matchAll(/\bGL\.([A-Za-z_$][\w$]*)\s*=/g)) provided.add(m[1]);
+  for (const m of src.matchAll(/GL\.hooks\.push/g)) provided.add('hooks');
+}
+// 浏览器/标准 API 与数据结构不算
+const BUILTIN = new Set(['document', 'window', 'state', 'hooks', 'VERSION', 'log', 'fmtRel', 'todayKey']);
+const missing = appNeeds.filter((n) => !provided.has(n) && !BUILTIN.has(n));
+if (missing.length) {
+  problems.push(`app.js 调用了无人提供的 GL 函数：${missing.join(', ')}\n    → 启动时会抛 TypeError 并中断，导致整页白屏`);
+} else {
+  ok.push(`app.js 依赖的 GL.* 均有提供者（${appNeeds.length} 个）`);
 }
 
 if (scripts.some((s) => /three/i.test(s))) {
@@ -78,8 +102,10 @@ const assets = [...sw.matchAll(/'([^']+\.(?:js|css|html|svg|webmanifest))'/g)].m
 for (const f of jsFiles) {
   if (!assets.includes(`js/${f}`)) problems.push(`sw.js ASSETS 漏了 js/${f}`);
 }
-if (/gamelife-v5/.test(sw)) ok.push('sw.js 缓存版本已升到 v5');
-else problems.push('sw.js 缓存版本未升级（改了资源必须升版，否则旧缓存不刷新）');
+const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
+const MIN_SW_VER = 6;   // v1.4.2：修白屏事故 + 补回 avatar.js，必须 ≥ v6 才能冲掉旧缓存
+if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
+else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 
 /* ---------- 输出 ---------- */
 ok.forEach((s) => console.log('  ✓ ' + s));

@@ -1,4 +1,4 @@
-const CACHE = 'gamelife-v5';
+const CACHE = 'gamelife-v6';
 const ASSETS = [
   './',
   'index.html',

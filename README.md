@@ -28,9 +28,10 @@ game-life/
 ├── js/skills.js            # 技能经验值（＋ 手动加经验）
 ├── js/life.js              # 生命周刻度
 ├── js/app.js               # 入口：导航、顶栏读数、设置、启动流程
-├── tools/verify-portrait.js # 无头图层校验：立绘 36 用例（见下）
-├── tools/verify-wiring.js  # 接线校验：脚本顺序 / 宿主节点 / sw 清单
-├── tools/render-preview.js # 把立绘落成 SVG+PNG，供目视检查比例
+├── tools/verify-portrait.js # 无头图层校验：立绘 36 用例
+├── tools/verify-wiring.js  # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / sw 版本
+├── tools/browser-check.js  # 浏览器冒烟：真跑页面 + 抓运行时异常 + 断言渲染产物 + 出 PNG
+├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
 ├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
 ├── sw.js                   # Service Worker（离线缓存）
 └── manifest.webmanifest    # PWA 安装配置
@@ -76,22 +77,40 @@ const px = (r) => r * KX;
 
 ### 三层校验
 
-改动 `portrait.js` / `index.html` / `sw.js` 后依次运行：
+改动 `portrait.js` / `index.html` / `sw.js` / `app.js` 后依次运行：
 
 ```bash
 node tools/verify-portrait.js   # 36 用例图层校验：6 体型 × 5 发型 + 衣橱/肤色/裙装组合
-node tools/verify-wiring.js     # 接线校验：脚本加载顺序 / 宿主节点 / viewBox / sw 清单
-node tools/render-preview.js    # 出 SVG+PNG，肉眼检查比例（唯一能「看见」画面的手段）
+node tools/verify-wiring.js     # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / sw 清单与版本
+node tools/browser-check.js     # 浏览器冒烟：真跑一遍页面，抓运行时异常 + 断言渲染产物 + 出图
 ```
 
 - `verify-portrait.js`：无头 DOM 桩件跑一遍 `drawAll()`，检查坏值 `NaN/undefined`、
   路径语法、**填充路径必须 `Z` 闭合**（`fill: none` 的线稿豁免）、关键部位是否齐备。
 - `verify-wiring.js`：补前者的盲区 —— 脚本顺序必须为
-  `storage → portrait → physiology → attributes → skills → life → app`，
+  `storage → avatar → portrait → physiology → attributes → skills → life → app`，
   16 个宿主节点齐全、`#portrait-svg` 的 `viewBox` 与画布一致、无 Three.js CDN 残留、
-  `sw.js` 的 `ASSETS` 完整且缓存版本号已递增。
-- `render-preview.js`：`node tools/render-preview.js [发型] [体重] [肌肉]`，
-  落盘后用系统浏览器 `--headless --screenshot` 栅格化成 PNG。
+  **`app.js` 调用的每个 `GL.*` 都有提供者**（见下方事故复盘）、`sw.js` 的 `ASSETS` 完整且缓存版本 ≥ v6。
+- `browser-check.js`（**最贴近真实的一层**）：内置静态服务器 + CDP 驱动真实浏览器跑一遍，
+  抓 `pageerror` / `console.error`，并断言「立绘 path 数 ≥ 30」「`.rv.in === .rv`」「卡片数 ≥ 5」等
+  只有真渲染才能验证的状态，同时输出整页与立绘区域 PNG。
+  依赖 `ws`：`cd C:/Users/ZHANG/.workbuddy/binaries/node/workspace && npm i ws`，
+  然后 `NODE_PATH=<该 node_modules> node tools/browser-check.js`。
+
+#### 为什么需要第三层（v1.4.2 白屏事故复盘）
+
+v1.4.0 改造时 `index.html` 漏掉了 `<script src="js/avatar.js">`，而 `app.js` 的 `start()` 里在调
+`GL.initAvatar()`。于是：
+
+1. `start()` 在 `GL.initAvatar()` 处抛 `TypeError`，**后续语句全部中断**；
+2. 排在后面的 `reveal()` 从未执行，所有 `.rv` 元素永久停在 `.rv { opacity: 0 }`；
+3. 结果：页面全黑空白，只有背景网格和底栏——**一个漏掉的 `<script>`，整页白屏**。
+
+关键教训：**`verify-portrait` 与 `verify-wiring` 当时全绿**。它们是静态分析，
+只查"文件内容对不对"，查不到"页面跑起来会不会崩"。所以补了 `browser-check.js`，
+并在 `verify-wiring.js` 里加了「`GL.*` 提供者」检查。
+同时 `app.js` 的 `start()` 改为 `step()` 逐步兜错 + `reveal()` 超时兜底 —— 现在任何一个模块出事，
+都不会再让整页白屏。
 
 ### 3D 版仍在，但已休眠
 
@@ -148,3 +167,5 @@ git stash && git checkout v1.1.0
 | v1.2.0 | 2026-09-15 | 黑色 HUD 主题重构；属性/生理环绕 3D 形象；技能简化为「＋ 手动加经验」；引入 Git 版本管理 |
 | v1.3.0 | 2026-09-15 | 3D 模型重建：基本体拼装 → 截面放样；分段关节 / 面部特征 / 三维手掌脚型；体重肌肉双轴驱动围度；新增 `tools/verify-avatar.js` 几何校验 |
 | v1.4.0 | 2026-09-18 | 中央形象由 Three.js 3D 模型切换为**纯代码矢量 SVG 分层立绘**（方案④）：9 图层合成、零外部依赖、完全离线；建立 `H = 940` / `yOf(f)` / `px(r)` 统一坐标基准；3D 渲染段休眠保留（`git checkout v1.3.0 -- .` 可回滚）；新增 `verify-portrait` / `verify-wiring` / `render-preview` 三件校验工具 |
+| v1.4.1 | 2026-09-18 | 文档收尾：README 补齐分层立绘说明与校验流程 |
+| v1.4.2 | 2026-09-18 | **修复整页白屏事故**：index.html 漏加载 `js/avatar.js` → `app.js` 调 `GL.initAvatar()` 抛异常中断启动 → `reveal()` 未执行 → 所有 `.rv` 永久 `opacity:0`。修法：补回脚本 + `start()` 改 `step()` 逐步兜错 + `reveal()` 超时兜底；新增 `tools/browser-check.js` 浏览器冒烟测试，`verify-wiring.js` 增补「`GL.*` 提供者」检查；顺带打磨立绘三处观感（领口改圆领、衣摆不再露肤色、鞋头明显朝外）；sw 缓存升 v6 |

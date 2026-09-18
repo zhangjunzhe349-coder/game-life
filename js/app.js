@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.4.2';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 工具：今日饮水 ---------- */
@@ -228,23 +228,40 @@
   }
 
   /* ---------- 启动 ---------- */
-  function start() {
-    GL.load();
-    GL.renderBody();
-    GL.renderAttrs();
-    GL.renderSkills();
-    GL.renderLife();
-    renderSettings();
-    bindSettings();
-    GL.initAvatar();
-    GL.renderAvatarCtrl();
-    initTabs();
-    initCtrlToggle();
+  /* 每个步骤独立兜错：任何一个模块出问题，都不该让整页停在 opacity:0 的白屏。
+     v1.4.1 事故复盘：曾因 js/avatar.js 漏加载，导致 GL.initAvatar 抛异常，
+     连带后面的 reveal() 未执行，所有 .rv 元素永久隐藏。 */
+  function step(name, fn) {
+    try { fn(); }
+    catch (e) { console.error('[GameLife] 启动步骤失败：' + name, e); }
+  }
 
+  function start() {
+    step('load', () => GL.load());
+    step('renderSettings', () => renderSettings());
+    step('bindSettings', () => bindSettings());
+    step('initAvatar', () => { if (GL.initAvatar) GL.initAvatar(); });
+    step('renderAvatarCtrl', () => { if (GL.renderAvatarCtrl) GL.renderAvatarCtrl(); });
+    step('initTabs', () => initTabs());
+    step('initCtrlToggle', () => initCtrlToggle());
+
+    // 本文件自己贡献的两个 HUD 视图挂进钩子链
     GL.hooks.push(renderHudBar, renderStageBase);
-    renderHudBar();
-    renderStageBase();
-    reveal();
+
+    /* 首屏全量渲染：必须走 GL.changed() 而非逐个手动调用。
+       原因：各模块（portrait / physiology / attributes / skills / life）都是把自己的
+       渲染函数 push 进 GL.hooks，只有 GL.changed() 会遍历执行它们。
+       v1.4.0 事故复盘：start() 曾只手动调用 renderBody/renderAttrs/... 而从未触发
+       GL.changed()，导致 portrait.js 注册的 render 永不执行 —— 中央立绘始终空白。 */
+    step('changed (首屏全量渲染)', () => GL.changed());
+
+    // reveal 必须最后且必须成功执行 —— 它是唯一的"点亮全屏"动作
+    step('reveal', () => reveal());
+    // 兜底：若 IntersectionObserver 未触发（元素在视口外、观察器异常等），
+    // 1.2s 后强制点亮所有仍未显示的 .rv，绝不留下白屏
+    setTimeout(() => {
+      document.querySelectorAll('.rv:not(.in)').forEach((e) => e.classList.add('in'));
+    }, 1200);
 
     // Service Worker（PWA 离线 + 安装）
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
