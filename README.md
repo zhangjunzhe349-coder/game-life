@@ -1,6 +1,6 @@
 # Game Life · 人生游戏面板
 
-把人生当成游戏来打：3D 形象 + 生理追踪 + 属性面板 + 技能成长 + 生命刻度。
+把人生当成游戏来打：人物立绘 + 生理追踪 + 属性面板 + 技能成长 + 生命刻度。
 纯前端 PWA，数据存于本机 localStorage，无需登录、可离线、可安装到桌面。
 
 ## 运行
@@ -18,50 +18,88 @@ python -m http.server 8080
 
 ```
 game-life/
-├── index.html              # 结构：顶栏 HUD / 左翼属性 / 中央 3D 舞台 / 右翼生理 + 技能·生命·设置
+├── index.html              # 结构：顶栏 HUD / 左翼属性 / 中央人物立绘 / 右翼生理 + 技能·生命·设置
 ├── css/style.css           # 设计令牌 + 组件 + 响应式 + 降级动效
 ├── js/storage.js           # 数据层：默认数据、技能篇预设、等级曲线、工具函数
-├── js/avatar.js            # 3D 形象：截面放样人形 + AI 衣橱
+├── js/portrait.js          # 分层 2D 立绘引擎（中央形象，纯 SVG 矢量绘制）
+├── js/avatar.js            # 体型参数 + 衣橱单品的控制面板（3D 渲染段已休眠）
 ├── js/physiology.js        # 饮水 + 自定义生理指标（HUD 右翼）
 ├── js/attributes.js        # 自定义属性打分（HUD 左翼）
 ├── js/skills.js            # 技能经验值（＋ 手动加经验）
 ├── js/life.js              # 生命周刻度
 ├── js/app.js               # 入口：导航、顶栏读数、设置、启动流程
-├── tools/verify-avatar.js  # 无头几何校验（见下）
+├── tools/verify-portrait.js # 无头图层校验：立绘 36 用例（见下）
+├── tools/verify-wiring.js  # 接线校验：脚本顺序 / 宿主节点 / sw 清单
+├── tools/render-preview.js # 把立绘落成 SVG+PNG，供目视检查比例
+├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
 ├── sw.js                   # Service Worker（离线缓存）
 └── manifest.webmanifest    # PWA 安装配置
 ```
 
-## 3D 模型说明（v1.3.0）
+## 分层 2D 立绘说明（v1.4.0）
 
-模型由 `js/avatar.js` **程序化生成**，不依赖任何外部模型文件：
+中央形象由 `js/portrait.js` **纯代码矢量绘制**，零图片、零字体文件、零 CDN —— 彻底离线。
 
-- **放样法**：`surface(rings, seg)` 由一系列水平截面环生成闭合曲面。每个环可独立控制横向半径 `rx`、
-  纵向半径 `rz` 与前后偏移 `z`，因此躯干能做出「上宽下窄的梯形截面 + 臀部后凸 + 腹部前凸」，
-  而不是一根圆柱。
-- **人体比例**：取自标准人体测量学，以身高 `H` 为单位。肩宽 `0.252H`、胸宽 `0.183H`、
-  髋宽 `0.189H`、眼线 `0.926H`、肩线 `0.820H`、胯 `0.475H`、膝 `0.280H`。
-- **体型驱动**：体重偏差驱动腰/胸/四肢围度，肌肉量驱动肩宽与胸厚度。头部尺寸不随体重变化（更真实）。
-- **分段关节**：四肢由踝→小腿→膝→大腿、腕→前臂→肘→上臂分段放样，肘膝处有半径过渡；
-  手臂沿 X 轴渐次外展；手为「掌 + 并指 + 拇指」三段而非球体；脚为有脚背弧度的鞋型。
-- **面部**：下颌收窄的头部曲面 + 鼻梁 / 鼻翼 / 眼白 / 虹膜 / 眉 / 口 / 耳。
-- **头发**：`hairGeo()` 生成贴合头骨的壳层，发际线随角度变化（额前高、后颈低），
-  再沿参数 `t` 收敛到头顶，因此不会出现环序倒置。
-- **衣橱**：上装/下装是身体曲面的**外扩壳层**（不是替换本体），穿脱即为壳层的显隐。
+### 图层结构（自下而上 9 层）
 
-### 几何校验
+`ground` → `hairBack` → `legs` → `shoes` → `body` → `arms` → `head` → `hairFront` → `accessory`
 
-改动 `avatar.js` 后请运行：
+每层是一个独立函数，只吃一个 `shape()` 得到的半宽表 `s`，因此体型一变全层同步重算，
+不存在「改了身体忘了改衣服」的错位。上装/下装由 `body()` 依据躯干轮廓**外扩 `pad = 7`** 得到，
+天然合身；裙装由单品名匹配 `/裙|skirt|dress/i` 切换分支。
 
-```bash
-node tools/verify-avatar.js
+### 坐标基准（改几何前务必先读这段）
+
+```js
+const H = 940;                     // 身高对应的画布高度
+const TOP = 28;                    // 头顶在画布中的 y
+const yOf = (f) => TOP + f * H;    // 以身高比例取 y
+
+const CX = 340;                    // 画布中枢线（viewBox 宽 680）
+const KX = 940;                    // 横向换算：1 单位半径 = 1 画布像素
+const px = (r) => r * KX;
 ```
 
-它用最小 THREE 桩件无头跑一遍 `build()`，覆盖 6 组体型 × 5 种发型 × 多种衣橱组合，检查：
-顶点 NaN、空几何、**法线内翻**（环序倒置会导致整个曲面里外翻转）。全绿才算通过。
+所有 `Y` 表的 y 值一律由 `yOf(f)` 派生，**禁止硬编码绝对像素**。人体测量学比例（以身高 `H` 为单位）：
+眼线 `0.926H`、颌下 `0.862H`、肩线 `0.820H`、胯 `0.475H`、膝 `0.280H`；
+肩宽 `0.252H`、胸宽 `0.183H`、腰宽 `0.160H`、髋宽 `0.189H`、头宽 `0.088H`。
 
-> 已知坑：`surface()` 要求截面环**自下而上**递增。写反了会导致该曲面法线整体内翻，
-> 在暗场打光下表现为一块死黑。函数内已有防御性反转，但新写环数组时仍应保持递增。
+体型驱动与 3D 版同一套公式：`dw = clamp((weight-68)/68, -0.35, 0.55)`、`mus = clamp(muscle/100, 0, 1)`，
+各围度 = 基准 × 体重修正 × 肌肉修正。
+
+### 路径构造
+
+`curve(pts)` 把 `[c1x, c1y, c2x, c2y, px, py, ...]` 转成 `M p0 C c1 c2 p1 C …`。
+
+> **已知坑**：数组里**每个点必须 6 个元素**（两个控制点 + 一个锚点）。写成 8 个会产出
+> `undefined undefined` 的路径而不报错，必须靠下面的校验工具兜住。
+
+### 三层校验
+
+改动 `portrait.js` / `index.html` / `sw.js` 后依次运行：
+
+```bash
+node tools/verify-portrait.js   # 36 用例图层校验：6 体型 × 5 发型 + 衣橱/肤色/裙装组合
+node tools/verify-wiring.js     # 接线校验：脚本加载顺序 / 宿主节点 / viewBox / sw 清单
+node tools/render-preview.js    # 出 SVG+PNG，肉眼检查比例（唯一能「看见」画面的手段）
+```
+
+- `verify-portrait.js`：无头 DOM 桩件跑一遍 `drawAll()`，检查坏值 `NaN/undefined`、
+  路径语法、**填充路径必须 `Z` 闭合**（`fill: none` 的线稿豁免）、关键部位是否齐备。
+- `verify-wiring.js`：补前者的盲区 —— 脚本顺序必须为
+  `storage → portrait → physiology → attributes → skills → life → app`，
+  16 个宿主节点齐全、`#portrait-svg` 的 `viewBox` 与画布一致、无 Three.js CDN 残留、
+  `sw.js` 的 `ASSETS` 完整且缓存版本号已递增。
+- `render-preview.js`：`node tools/render-preview.js [发型] [体重] [肌肉]`，
+  落盘后用系统浏览器 `--headless --screenshot` 栅格化成 PNG。
+
+### 3D 版仍在，但已休眠
+
+`js/avatar.js` 保留完整的 3D 建模代码（`build()` / `surface()` / `hairGeo()` 等），
+但 `init()` 开头有 `if (typeof THREE === 'undefined') return;`，在无 Three.js 的环境下静默跳过。
+它现在只承担**体型参数 + 衣橱单品的控制面板**职责。
+想回到 3D 版：`git checkout v1.3.0 -- .` 后重新提交（会一并恢复 Three.js CDN 与 index.html 的 canvas 节点）。
+`tools/verify-avatar.js`（32 用例）随之保留。
 
 
 ## 设计定调（v1.2.0）
@@ -70,7 +108,7 @@ node tools/verify-avatar.js
 - **底色**：`#08090d`（暖调近黑，绝不用纯黑）；表面 `#101219` / `#151822`
 - **强调色**：信号青 `#3ce8b0`（进度、主动作、属性条）· 琥珀 `#ffc24b`（XP / 生命刻度）· 冷蓝 `#4cc9f0`（饮水）
 - **字体**：Chakra Petch（展示 / 数字标题）+ JetBrains Mono（标签、等宽数字 tabular-nums）+ 中文黑体（正文，字距 `0.02em`）
-- **记忆点**：以 3D 形象为圆心，属性与生理状态环绕呈现的一体化 HUD，不是分页堆叠
+- **记忆点**：以人物立绘为圆心，属性与生理状态环绕呈现的一体化 HUD，不是分页堆叠
 
 ## 版本管理与回滚
 
@@ -109,3 +147,4 @@ git stash && git checkout v1.1.0
 | v1.1.0 | 2026-09-14 | 亮色 ZENITH 风格、技能篇文档内化为预设数据、角色档案卡 |
 | v1.2.0 | 2026-09-15 | 黑色 HUD 主题重构；属性/生理环绕 3D 形象；技能简化为「＋ 手动加经验」；引入 Git 版本管理 |
 | v1.3.0 | 2026-09-15 | 3D 模型重建：基本体拼装 → 截面放样；分段关节 / 面部特征 / 三维手掌脚型；体重肌肉双轴驱动围度；新增 `tools/verify-avatar.js` 几何校验 |
+| v1.4.0 | 2026-09-18 | 中央形象由 Three.js 3D 模型切换为**纯代码矢量 SVG 分层立绘**（方案④）：9 图层合成、零外部依赖、完全离线；建立 `H = 940` / `yOf(f)` / `px(r)` 统一坐标基准；3D 渲染段休眠保留（`git checkout v1.3.0 -- .` 可回滚）；新增 `verify-portrait` / `verify-wiring` / `render-preview` 三件校验工具 |
