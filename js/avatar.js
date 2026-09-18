@@ -1,143 +1,493 @@
-/* ============ Game Life · 3D 人物形象 & AI 衣橱 ============ */
+/* ============ Game Life · 3D 人物形象 & AI 衣橱 ============
+   v1.3.0 模型重建（方案①：程序化精细模型）
+   从「20 个基本体拼装」升级为「截面放样 + 分段关节 + 面部特征」
+
+   人体比例取自标准人体测量学（以身高 H 为单位）：
+     肩宽 0.252H · 胸宽 0.183H / 胸厚 0.126H · 腰宽 0.160H / 腰厚 0.114H
+     髋宽 0.189H · 大腿 r=0.050H · 小腿 r=0.034H · 上臂 r=0.029H
+     颌下 0.862H · 眼线 0.926H · 肩线 0.820H · 胯 0.475H · 膝 0.280H
+
+   保持：体型参数驱动 / 衣橱四槽位 / 完全离线 / 零外部资源
+   ============================================================ */
 (function () {
   'use strict';
 
-  let renderer, scene, camera, modelGroup;
-  let camDist = 3.4, baseZ = 1;
-  let torsoMesh = null, initialized = false;
+  let renderer, scene, camera, modelGroup, torsoMesh;
+  let camDist = 3.4, raf = 0;
+  let initialized = false;
   let dragging = false, lastX = 0, lastY = 0, camHeight = 1.0, lookY = 1.0;
-  const mats = { top: [], bottom: [], shoes: [], skin: [], hair: [], acc: [] };
+
+  let matPool = [];
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
   function A() { return GL.state.avatar; }
-
   function itemOf(id) { return A().wardrobe.find((w) => w.id === id) || null; }
 
-  function mkMat(list, color) {
-    const m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.78, metalness: 0.05 });
-    mats[list].push(m);
+  /* ---------- 材质 ---------- */
+  function mat(color, opt) {
+    opt = opt || {};
+    const m = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color),
+      roughness: opt.roughness == null ? 0.74 : opt.roughness,
+      metalness: opt.metalness == null ? 0.02 : opt.metalness,
+      side: opt.side || THREE.FrontSide
+    });
+    matPool.push(m);
     return m;
   }
 
-  function clearMats() { Object.keys(mats).forEach((k) => (mats[k].length = 0)); }
-
   function disposeGroup(g) {
-    g.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
-    });
+    g.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    matPool.forEach((m) => m.dispose());
+    matPool = [];
   }
 
-  function add(geo, mat, x, y, z, opt) {
+  /* ============================================================
+     几何核心：由水平截面环放样出闭合曲面
+     rings: [{ y, rx, rz, z? }] 自下而上；y 可为函数 y(a) 以生成变化的轮廓线
+     a 约定：0 = 右(+X)，π/2 = 前(+Z)，π = 左(−X)，3π/2 = 后(−Z)
+     ============================================================ */
+  function surface(rings, seg, opt) {
     opt = opt || {};
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x || 0, y || 0, z || 0);
-    if (opt.rx) mesh.rotation.x = opt.rx;
-    if (opt.ry) mesh.rotation.y = opt.ry;
-    if (opt.rz) mesh.rotation.z = opt.rz;
-    if (opt.sz) mesh.scale.z = opt.sz;
-    if (opt.cast !== false) mesh.castShadow = false;
-    modelGroup.add(mesh);
-    return mesh;
+    // 防御：截面环必须自下而上，否则法线会整体内翻（脚部曾踩过此坑）
+    const yOf = (r) => (typeof r.y === 'function' ? r.y(Math.PI / 2) : r.y);
+    const rr = (rings.length > 1 && yOf(rings[rings.length - 1]) < yOf(rings[0]))
+      ? rings.slice().reverse() : rings;
+    const n = rr.length, m = seg;
+    const pos = [], idx = [];
+
+    for (let i = 0; i < n; i++) {
+      const r = rr[i];
+      for (let j = 0; j < m; j++) {
+        const a = (j / m) * Math.PI * 2;
+        const y = (typeof r.y === 'function') ? r.y(a) : r.y;
+        pos.push(Math.cos(a) * r.rx, y, Math.sin(a) * r.rz + (r.z || 0));
+      }
+    }
+    for (let i = 0; i < n - 1; i++) {
+      for (let j = 0; j < m; j++) {
+        const a = i * m + j, b = i * m + ((j + 1) % m);
+        const c = (i + 1) * m + j, d = (i + 1) * m + ((j + 1) % m);
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    const capAt = (ri, up) => {
+      const r = rr[ri], ci = pos.length / 3;
+      const y = (typeof r.y === 'function') ? r.y(Math.PI / 2) : r.y;
+      pos.push(0, y, r.z || 0);
+      for (let j = 0; j < m; j++) {
+        const a = ri * m + j, b = ri * m + ((j + 1) % m);
+        if (up) idx.push(ci, b, a); else idx.push(ci, a, b);
+      }
+    };
+    if (opt.capBottom) capAt(0, false);
+    if (opt.capTop) capAt(n - 1, true);
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
   }
 
+  function mesh(geo, material, opt) {
+    opt = opt || {};
+    const m = new THREE.Mesh(geo, material);
+    if (opt.p) m.position.set(opt.p[0], opt.p[1], opt.p[2]);
+    if (opt.r) m.rotation.set(opt.r[0], opt.r[1], opt.r[2]);
+    if (opt.s) m.scale.set(opt.s[0], opt.s[1], opt.s[2]);
+    modelGroup.add(m);
+    return m;
+  }
+
+  /* ---------- 头部侧面轮廓（单位 H，自颌下到头顶） ---------- */
+  const HEAD = [
+    { y: 0.862, rx: 0.014, rz: 0.017, z: 0.003 },   // 颌下
+    { y: 0.873, rx: 0.026, rz: 0.031, z: 0.003 },   // 下颌
+    { y: 0.885, rx: 0.035, rz: 0.042, z: 0.002 },   // 口
+    { y: 0.898, rx: 0.042, rz: 0.051, z: 0.001 },   // 颧
+    { y: 0.912, rx: 0.045, rz: 0.055, z: 0.000 },
+    { y: 0.926, rx: 0.047, rz: 0.057, z: 0.000 },   // 眼线
+    { y: 0.940, rx: 0.047, rz: 0.058, z: 0.000 },   // 眉
+    { y: 0.954, rx: 0.046, rz: 0.056, z: 0.000 },   // 额
+    { y: 0.968, rx: 0.042, rz: 0.051, z: 0.000 },
+    { y: 0.982, rx: 0.033, rz: 0.040, z: 0.000 },
+    { y: 0.994, rx: 0.017, rz: 0.021, z: 0.001 }    // 头顶
+  ];
+
+  /** 求高度 h（单位 H）处的头部横向半径 —— 线性插值，避免阶梯误差 */
+  function headRadiusAt(h) {
+    const hh = clamp(h, HEAD[0].y, HEAD[HEAD.length - 1].y);
+    let lo = HEAD[0], hi = HEAD[HEAD.length - 1];
+    for (let i = 0; i < HEAD.length - 1; i++) {
+      if (hh >= HEAD[i].y && hh <= HEAD[i + 1].y) { lo = HEAD[i]; hi = HEAD[i + 1]; break; }
+    }
+    const t = hi.y === lo.y ? 0 : (hh - lo.y) / (hi.y - lo.y);
+    return {
+      rx: lo.rx + (hi.rx - lo.rx) * t,
+      rz: lo.rz + (hi.rz - lo.rz) * t,
+      z: (lo.z || 0) + ((hi.z || 0) - (lo.z || 0)) * t
+    };
+  }
+
+  /** 头部前表面在给定高度 / 横向偏移处的 z 坐标（单位 H） */
+  function faceZ(hH, xH) {
+    const r = headRadiusAt(hH);
+    const nx = clamp(Math.abs(xH) / r.rx, 0, 0.999);
+    return r.rz * Math.sqrt(1 - nx * nx) + r.z;
+  }
+
+  /** 头发壳层：自随角度变化的发际线，沿参数 t 收敛到头顶，半径贴合头骨 */
+  function hairGeo(H, frontH, backH, bulk, seg) {
+    const ts = [0, 0.16, 0.33, 0.50, 0.67, 0.83, 1.0];
+    const crown = 0.999;
+    const n = ts.length, m = seg;
+    const pos = [], idx = [];
+
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < m; j++) {
+        const a = (j / m) * Math.PI * 2;
+        const f = (Math.cos(a - Math.PI / 2) + 1) / 2;         // 1 = 前，0 = 后
+        const yf = backH + (frontH - backH) * f;
+        const yH = yf + ts[i] * (crown - yf);
+        const r = headRadiusAt(yH);
+        pos.push(Math.cos(a) * r.rx * bulk * H, yH * H, Math.sin(a) * r.rz * bulk * H + r.z * H);
+      }
+    }
+    for (let i = 0; i < n - 1; i++) {
+      for (let j = 0; j < m; j++) {
+        const a = i * m + j, b = i * m + ((j + 1) % m);
+        const c = (i + 1) * m + j, d = (i + 1) * m + ((j + 1) % m);
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    const ci = pos.length / 3;
+    pos.push(0, crown * H, 0);
+    for (let j = 0; j < m; j++) {
+      const a = (n - 1) * m + j, b = (n - 1) * m + ((j + 1) % m);
+      idx.push(ci, b, a);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }
+
+  /* ============================================================
+     建模主流程
+     ============================================================ */
   function build() {
     if (!modelGroup) return;
     disposeGroup(modelGroup);
     while (modelGroup.children.length) modelGroup.remove(modelGroup.children[0]);
-    clearMats();
     torsoMesh = null;
 
     const a = A();
-    const h = a.height / 100;
-    const w = THREE.MathUtils.clamp(0.8 + ((a.weight - 45) / 45) * 0.5, 0.6, 1.5);
-    const m = a.muscle / 100;
+    const H = a.height / 100;                                  // 米
+    const dw = clamp((a.weight - 68) / 68, -0.35, 0.55);       // 相对标准体重偏差
+    const mus = clamp(a.muscle / 100, 0, 1);
 
-    const legH = 0.47 * h, torsoH = 0.30 * h, headR = 0.068 * h, neckH = 0.035 * h;
-    const shoulderY = legH + torsoH;
-    const torsoR = 0.078 * h * w * (0.9 + 0.25 * m);
-    const armR = 0.020 * h * (0.75 + 0.55 * m) * (0.9 + 0.2 * (w - 1));
-    const legR = 0.034 * h * (0.8 + 0.45 * m) * (0.85 + 0.3 * (w - 1));
-    baseZ = 0.6 + 0.45 * w;
+    const Y = {
+      knee: 0.280 * H, crotch: 0.475 * H, hip: 0.505 * H,
+      waist: 0.618 * H, chest: 0.725 * H, shldr: 0.820 * H, neck: 0.846 * H
+    };
 
-    const skinMat = mkMat('skin', a.skin);
+    /* 关键半径：基准值 × 体重修正 × 肌肉修正 */
+    const R = {
+      shldrW:  0.1260 * H * (1 + 0.18 * dw) * (1 + 0.14 * mus),
+      chestRX: 0.0914 * H * (1 + 0.45 * dw) * (1 + 0.06 * mus),
+      chestRZ: 0.0629 * H * (1 + 0.85 * dw) * (1 + 0.30 * mus),
+      waistRX: 0.0800 * H * (1 + 0.85 * dw) * (1 - 0.04 * mus),
+      waistRZ: 0.0571 * H * (1 + 0.90 * dw),
+      hipRX:   0.0943 * H * (1 + 0.55 * dw),
+      hipRZ:   0.0640 * H * (1 + 0.70 * dw),
+      thigh:   0.0500 * H * (1 + 0.55 * dw) * (1 + 0.22 * mus),
+      knee:    0.0314 * H * (1 + 0.45 * dw),
+      calf:    0.0337 * H * (1 + 0.45 * dw) * (1 + 0.20 * mus),
+      ankle:   0.0200 * H * (1 + 0.35 * dw),
+      upArm:   0.0291 * H * (1 + 0.50 * dw) * (1 + 0.30 * mus),
+      foreArm: 0.0246 * H * (1 + 0.45 * dw) * (1 + 0.28 * mus),
+      wrist:   0.0154 * H * (1 + 0.32 * dw),
+      neck:    0.0337 * H * (1 + 0.50 * dw) * (1 + 0.10 * mus)
+    };
+
+    const legX = R.hipRX * 0.50;
+    const armX = (k) => R.shldrW * k;
+    const bellyZ = Math.max(0, dw) * 0.016 * H;
+
+    /* ---------- 材质 ---------- */
+    const skinM = mat(a.skin, { roughness: 0.66 });
+    const hairM = mat(a.hairColor, { roughness: 0.58, side: THREE.DoubleSide });
+    const browM = mat('#2a2018', { roughness: 0.72 });
+    const scleraM = mat('#f2efe9', { roughness: 0.34 });
+    const irisM = mat('#20242e', { roughness: 0.22 });
+    const mouthM = mat('#5d3a35', { roughness: 0.72 });
+
     const topItem = itemOf(a.outfit.top);
-    const topMat = topItem ? mkMat('top', topItem.color) : skinMat;
     const botItem = itemOf(a.outfit.bottom);
-    const botMat = botItem ? mkMat('bottom', botItem.color) : mkMat('bottom', '#7d828f');
     const shoeItem = itemOf(a.outfit.shoes);
-    const shoeMat = mkMat('shoes', shoeItem ? shoeItem.color : '#2a2d38');
-    const hairMat = mkMat('hair', a.hairColor);
-
-    /* --- 躯干 --- */
-    torsoMesh = add(new THREE.CylinderGeometry(torsoR * 1.08, torsoR * 0.8, torsoH, 22), topMat, 0, legH + torsoH / 2, 0, { sz: baseZ });
-    add(new THREE.SphereGeometry(torsoR * 1.08, 18, 14), topMat, 0, shoulderY, 0, { sz: baseZ }); // 肩部圆润
-    /* --- 髋部 --- */
-    add(new THREE.CylinderGeometry(legR * 1.7, legR * 1.5, 0.08 * h, 18), botMat, 0, legH - 0.02 * h, 0, { sz: 0.85 });
-
-    /* --- 四肢 --- */
-    const armLen = 0.30 * h;
-    const armTopY = shoulderY - 0.01 * h;
-    for (const s of [-1, 1]) {
-      // 腿
-      add(new THREE.CylinderGeometry(legR, legR * 0.8, legH - 0.05 * h, 16), botMat, s * legR * 1.5, 0.03 * h + (legH - 0.05 * h) / 2, 0);
-      // 脚
-      add(new THREE.BoxGeometry(0.075 * h, 0.05 * h, 0.16 * h), shoeMat, s * legR * 1.5, 0.026 * h, 0.035 * h);
-      // 手臂
-      add(new THREE.CylinderGeometry(armR, armR * 0.85, armLen, 14), topMat, s * (torsoR * 1.15 + armR * 0.9), armTopY - armLen / 2, 0, { rz: s * 0.07 });
-      // 手
-      add(new THREE.SphereGeometry(armR * 1.25, 12, 10), skinMat, s * (torsoR * 1.15 + armR * 1.15), armTopY - armLen, 0);
-    }
-
-    /* --- 颈 & 头 --- */
-    add(new THREE.CylinderGeometry(0.028 * h, 0.032 * h, neckH, 12), skinMat, 0, shoulderY + neckH / 2, 0);
-    const headY = shoulderY + neckH + headR * 0.85;
-    add(new THREE.SphereGeometry(headR, 26, 20), skinMat, 0, headY, 0, { sz: 1.05 });
-    // 眼睛
-    const eyeMat = mkMat('skin', '#1c1c22');
-    add(new THREE.SphereGeometry(0.010 * h, 8, 8), eyeMat, -0.028 * h, headY + 0.005 * h, headR * 0.82);
-    add(new THREE.SphereGeometry(0.010 * h, 8, 8), eyeMat, 0.028 * h, headY + 0.005 * h, headR * 0.82);
-
-    /* --- 发型 --- */
-    const st = a.hairStyle;
-    if (st === 'short') {
-      add(new THREE.SphereGeometry(headR * 1.07, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat, 0, headY + 0.004 * h, 0, { rx: -0.12, sz: 1.05 });
-    } else if (st === 'buzz') {
-      add(new THREE.SphereGeometry(headR * 1.03, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat, 0, headY + 0.002 * h, 0, { sz: 1.05 });
-    } else if (st === 'long') {
-      add(new THREE.SphereGeometry(headR * 1.07, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat, 0, headY + 0.004 * h, 0, { rx: -0.12, sz: 1.05 });
-      add(new THREE.CylinderGeometry(headR * 0.9, headR * 0.7, 0.26 * h, 16), hairMat, 0, headY - 0.10 * h, -headR * 0.55, { sz: 0.6 });
-    } else if (st === 'ponytail') {
-      add(new THREE.SphereGeometry(headR * 1.07, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat, 0, headY + 0.004 * h, 0, { rx: -0.12, sz: 1.05 });
-      add(new THREE.SphereGeometry(headR * 0.42, 14, 12), hairMat, 0, headY + 0.03 * h, -headR * 1.05);
-      add(new THREE.CylinderGeometry(0.018 * h, 0.026 * h, 0.15 * h, 10), hairMat, 0, headY - 0.05 * h, -headR * 1.25, { rx: 0.35 });
-    }
-    /* bald → 无头发 */
-
-    /* --- 配饰 --- */
     const accItem = itemOf(a.outfit.accessory);
-    if (accItem) {
-      if (accItem.kind === 'glasses') {
-        const gm = mkMat('acc', accItem.color || '#22222a');
-        const tR = 0.024 * h;
-        add(new THREE.TorusGeometry(tR, 0.004 * h, 8, 20), gm, -0.028 * h, headY + 0.005 * h, headR * 0.9);
-        add(new THREE.TorusGeometry(tR, 0.004 * h, 8, 20), gm, 0.028 * h, headY + 0.005 * h, headR * 0.9);
-        add(new THREE.BoxGeometry(0.018 * h, 0.004 * h, 0.004 * h), gm, 0, headY + 0.006 * h, headR * 0.92);
-      } else { // hat
-        const hm = mkMat('acc', accItem.color);
-        add(new THREE.CylinderGeometry(0.072 * h, 0.076 * h, 0.07 * h, 20), hm, 0, headY + headR * 0.72, 0);
-        add(new THREE.CylinderGeometry(0.115 * h, 0.115 * h, 0.014 * h, 24), hm, 0, headY + headR * 0.42, 0);
+
+    const topM = topItem ? mat(topItem.color, { roughness: 0.82 }) : skinM;
+    const botM = botItem ? mat(botItem.color, { roughness: 0.84 }) : mat('#7d828f', { roughness: 0.84 });
+    const shoeM = mat(shoeItem ? shoeItem.color : '#2a2d38', { roughness: 0.55, metalness: 0.06 });
+
+    /* ============ 1. 腿（踝 → 小腿 → 膝 → 大腿） ============ */
+    const LEG = [
+      { y: 0.052, r: null, k: 'ankle', f: 1.05 },
+      { y: 0.110, r: null, k: 'ankle', f: 1.34 },
+      { y: 0.175, r: null, k: 'calf', f: 1.00 },
+      { y: 0.225, r: null, k: 'calf', f: 0.92 },
+      { y: 0.268, r: null, k: 'knee', f: 0.97 },
+      { y: 0.280, r: null, k: 'knee', f: 1.00 },
+      { y: 0.305, r: null, k: 'knee', f: 0.99 },
+      { y: 0.350, r: null, k: 'thigh', f: 0.88 },
+      { y: 0.400, r: null, k: 'thigh', f: 1.00 },
+      { y: 0.445, r: null, k: 'thigh', f: 1.08 },
+      { y: 0.478, r: null, k: 'thigh', f: 1.04 }
+    ];
+    const legRings = LEG.map((q) => {
+      const rr = R[q.k] * q.f;
+      return { y: q.y * H, rx: rr, rz: rr * 0.94, z: 0 };
+    });
+    const legRingsLow = legRings.filter((q) => q.y <= 0.480 * H);
+
+    for (const s of [-1, 1]) {
+      mesh(surface(legRings, 20, { capBottom: true, capTop: true }), botM, { p: [s * legX, 0, 0] });
+    }
+
+    /* ============ 2. 鞋（脚背弧度 + 前掌后跟） ============ */
+    const footRings = [
+      { y: 0.000 * H, rx: 0.0245 * H, rz: 0.0715 * H, z: 0.020 * H },   // 鞋底
+      { y: 0.004 * H, rx: 0.0268 * H, rz: 0.0750 * H, z: 0.020 * H },
+      { y: 0.014 * H, rx: 0.0268 * H, rz: 0.0680 * H, z: 0.019 * H },
+      { y: 0.028 * H, rx: 0.0262 * H, rz: 0.0530 * H, z: 0.015 * H },
+      { y: 0.044 * H, rx: 0.0255 * H, rz: 0.0360 * H, z: 0.008 * H },
+      { y: 0.058 * H, rx: 0.0255 * H, rz: 0.0290 * H, z: 0.002 * H }    // 脚踝口
+    ];
+    for (const s of [-1, 1]) {
+      mesh(surface(footRings, 20, { capTop: true, capBottom: true }), shoeM, { p: [s * legX, 0, 0] });
+    }
+
+    /* ============ 3. 躯干 + 颈（一体放样，肩部无接缝） ============ */
+    const torsoRings = [
+      { y: 0.458 * H, rx: R.hipRX * 0.95, rz: R.hipRZ * 0.90, z: -0.010 * H * (1 + 0.4 * dw) },
+      { y: 0.505 * H, rx: R.hipRX, rz: R.hipRZ, z: -0.013 * H * (1 + 0.4 * dw) },
+      { y: 0.552 * H, rx: R.hipRX * 0.93, rz: R.hipRZ * 0.90, z: -0.006 * H },
+      { y: 0.618 * H, rx: R.waistRX, rz: R.waistRZ, z: bellyZ },
+      { y: 0.668 * H, rx: R.waistRX * 1.09, rz: R.waistRZ * 1.22, z: bellyZ * 0.5 },
+      { y: 0.725 * H, rx: R.chestRX, rz: R.chestRZ, z: 0 },
+      { y: 0.775 * H, rx: R.chestRX * 0.99, rz: R.chestRZ * 0.94, z: 0 },
+      { y: 0.806 * H, rx: R.chestRX * 0.94, rz: R.chestRZ * 0.80, z: 0 },
+      { y: 0.820 * H, rx: R.shldrW * 0.97, rz: R.chestRZ * 0.70, z: 0 },
+      { y: 0.834 * H, rx: R.neck * 1.95, rz: R.chestRZ * 0.54, z: 0 },
+      { y: 0.845 * H, rx: R.neck * 1.30, rz: R.neck * 1.16, z: 0 },
+      { y: 0.858 * H, rx: R.neck * 1.03, rz: R.neck * 1.05, z: 0 },
+      { y: 0.872 * H, rx: R.neck * 0.93, rz: R.neck * 0.98, z: 0 },
+      { y: 0.882 * H, rx: R.neck * 0.80, rz: R.neck * 0.86, z: 0 },
+      { y: 0.891 * H, rx: R.neck * 0.64, rz: R.neck * 0.70, z: 0 }
+    ];
+    torsoMesh = mesh(surface(torsoRings, 26, { capBottom: true, capTop: true }), topM, {});
+
+    /* ============ 4. 手臂（上臂 / 肘 / 前臂 / 腕） ============ */
+    const ARM = [
+      { y: 0.462, k: 'wrist', f: 1.00 },
+      { y: 0.500, k: 'foreArm', f: 0.92 },
+      { y: 0.556, k: 'foreArm', f: 1.00 },
+      { y: 0.606, k: 'foreArm', f: 0.98 },
+      { y: 0.625, k: 'foreArm', f: 1.03 },       // 肘
+      { y: 0.664, k: 'upArm', f: 0.93 },
+      { y: 0.720, k: 'upArm', f: 1.00 },
+      { y: 0.772, k: 'upArm', f: 1.06 },
+      { y: 0.800, k: 'upArm', f: 1.10 },         // 三角肌
+      { y: 0.822, k: 'upArm', f: 0.86 }
+    ];
+    const armRings = ARM.map((q) => {
+      const rr = R[q.k] * q.f;
+      return { y: q.y * H, rx: rr, rz: rr * 0.96, z: 0 };
+    });
+    for (const s of [-1, 1]) {
+      const g = surface(armRings, 18, { capBottom: true, capTop: true });
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const yv = p.getY(i);
+        const t = clamp((yv - 0.462 * H) / (0.822 * H - 0.462 * H), 0, 1);
+        const k = 0.86 - t * 0.085;               // 肩 0.775 → 腕 0.86
+        p.setX(i, p.getX(i) + s * armX(k));
+      }
+      g.computeVertexNormals();
+      mesh(g, topM, {});
+    }
+
+    /* ============ 5. 手（掌 + 并指 + 拇指，非球体） ============ */
+    const handRings = [
+      { y: 0.378 * H, rx: 0.0115 * H, rz: 0.0062 * H, z: 0.002 * H },
+      { y: 0.392 * H, rx: 0.0140 * H, rz: 0.0068 * H, z: 0.002 * H },
+      { y: 0.412 * H, rx: 0.0150 * H, rz: 0.0074 * H, z: 0.001 * H },
+      { y: 0.432 * H, rx: 0.0155 * H, rz: 0.0080 * H, z: 0 },
+      { y: 0.452 * H, rx: 0.0145 * H, rz: 0.0082 * H, z: 0 },
+      { y: 0.464 * H, rx: 0.0128 * H, rz: 0.0080 * H, z: 0 }
+    ];
+    for (const s of [-1, 1]) {
+      mesh(surface(handRings, 14, { capTop: true, capBottom: true }), skinM, { p: [s * armX(0.855), 0, 0] });
+      mesh(new THREE.SphereGeometry(1, 10, 8), skinM, {
+        p: [s * (armX(0.855) - 0.0132 * H), 0.437 * H, 0.004 * H],
+        r: [0.30, 0, s * 0.45],
+        s: [0.0056 * H, 0.0155 * H, 0.0068 * H]
+      });
+    }
+
+    /* ============ 6. 头 ============ */
+    mesh(surface(HEAD.map((r) => ({ y: r.y * H, rx: r.rx * H, rz: r.rz * H, z: r.z * H })), 30,
+      { capBottom: true, capTop: true }), skinM, {});
+
+    /* ---------- 面部 ---------- */
+    const noseRings = [
+      { y: 0.898 * H, rx: 0.0058 * H, rz: 0.0050 * H, z: 0.0470 * H },
+      { y: 0.908 * H, rx: 0.0082 * H, rz: 0.0098 * H, z: 0.0518 * H },
+      { y: 0.918 * H, rx: 0.0078 * H, rz: 0.0104 * H, z: 0.0542 * H },
+      { y: 0.926 * H, rx: 0.0056 * H, rz: 0.0074 * H, z: 0.0520 * H }
+    ];
+    mesh(surface(noseRings, 12, { capTop: true, capBottom: true }), skinM, {});
+    for (const s of [-1, 1]) {                                       // 鼻翼
+      mesh(new THREE.SphereGeometry(1, 10, 8), skinM, {
+        p: [s * 0.0090 * H, 0.9000 * H, 0.0480 * H],
+        s: [0.0042 * H, 0.0034 * H, 0.0046 * H]
+      });
+    }
+    for (const s of [-1, 1]) {                                       // 眼：眼白 + 虹膜
+      const ex = s * 0.0215 * H, ey = 0.9265 * H;
+      const ez = (faceZ(0.9215, 0.0215) - 0.0022) * H;
+      mesh(new THREE.SphereGeometry(1, 12, 10), scleraM, {
+        p: [ex, ey, ez], s: [0.0086 * H, 0.0050 * H, 0.0050 * H]
+      });
+      mesh(new THREE.SphereGeometry(1, 10, 8), irisM, {
+        p: [ex, ey - 0.0003 * H, ez + 0.0036 * H], s: [0.0036 * H, 0.0036 * H, 0.0022 * H]
+      });
+    }
+    for (const s of [-1, 1]) {                                       // 眉
+      mesh(new THREE.BoxGeometry(0.0215 * H, 0.0038 * H, 0.0052 * H), browM, {
+        p: [s * 0.0222 * H, 0.9372 * H, (faceZ(0.9340, 0.0222) - 0.0016) * H],
+        r: [0.10, 0, s * -0.07]
+      });
+    }
+    mesh(new THREE.SphereGeometry(1, 14, 8), mouthM, {                // 口
+      p: [0, 0.8842 * H, (faceZ(0.8842, 0) - 0.0032) * H],
+      s: [0.0132 * H, 0.0026 * H, 0.0034 * H]
+    });
+    for (const s of [-1, 1]) {                                       // 耳
+      mesh(new THREE.SphereGeometry(1, 12, 10), skinM, {
+        p: [s * 0.0452 * H, 0.9200 * H, -0.0010 * H],
+        r: [0, 0, s * 0.12],
+        s: [0.0050 * H, 0.0112 * H, 0.0068 * H]
+      });
+    }
+
+    /* ============ 7. 头发 ============ */
+    const st = a.hairStyle;
+    if (st === 'buzz') {
+      mesh(hairGeo(H, 0.952, 0.928, 1.014, 26), hairM, {});
+    } else if (st !== 'bald') {
+      mesh(hairGeo(H, 0.944, 0.905, 1.045, 26), hairM, {});
+      if (st === 'long') {
+        const backRings = [
+          { y: 0.700 * H, rx: 0.0460 * H, rz: 0.0300 * H, z: -0.0340 * H },
+          { y: 0.760 * H, rx: 0.0500 * H, rz: 0.0330 * H, z: -0.0350 * H },
+          { y: 0.820 * H, rx: 0.0520 * H, rz: 0.0355 * H, z: -0.0345 * H },
+          { y: 0.870 * H, rx: 0.0520 * H, rz: 0.0380 * H, z: -0.0290 * H },
+          { y: 0.910 * H, rx: 0.0490 * H, rz: 0.0400 * H, z: -0.0180 * H },
+          { y: 0.940 * H, rx: 0.0450 * H, rz: 0.0430 * H, z: -0.0080 * H }
+        ];
+        mesh(surface(backRings, 20, { capBottom: true }), hairM, {});
+      }
+      if (st === 'ponytail') {
+        mesh(new THREE.SphereGeometry(1, 16, 12), hairM, {
+          p: [0, 0.952 * H, -0.0620 * H], s: [0.0225 * H, 0.0210 * H, 0.0155 * H]
+        });
+        const tail = [
+          { y: 0.760 * H, rx: 0.0105 * H, rz: 0.0105 * H, z: -0.0620 * H },
+          { y: 0.815 * H, rx: 0.0165 * H, rz: 0.0165 * H, z: -0.0640 * H },
+          { y: 0.870 * H, rx: 0.0210 * H, rz: 0.0205 * H, z: -0.0650 * H },
+          { y: 0.915 * H, rx: 0.0225 * H, rz: 0.0210 * H, z: -0.0640 * H },
+          { y: 0.945 * H, rx: 0.0195 * H, rz: 0.0180 * H, z: -0.0620 * H }
+        ];
+        mesh(surface(tail, 16, { capTop: true, capBottom: true }), hairM, {});
       }
     }
 
-    /* --- 相机适配身高 --- */
-    camDist = 2.0 + h * 0.78;
-    camHeight = shoulderY * 0.92;
-    lookY = h * 0.54;
+    /* ============ 8. 衣橱外壳（上装 / 下装） ============ */
+    const pad = 0.0075 * H;
+    if (topItem) {
+      const topRings = torsoRings.slice(2, 9)
+        .map((r) => ({ y: r.y, rx: r.rx + pad, rz: r.rz + pad * 1.07, z: r.z }));
+      topRings.unshift({
+        y: 0.446 * H, rx: R.hipRX * 0.97 + pad, rz: R.hipRZ * 0.93 + pad * 1.07,
+        z: -0.010 * H * (1 + 0.4 * dw)
+      });
+      topRings.push({ y: 0.828 * H, rx: R.chestRX * 0.94 + pad, rz: R.chestRZ * 0.80 + pad * 1.07, z: 0 });
+      topRings.push({ y: 0.836 * H, rx: R.neck * 1.86 + pad, rz: R.chestRZ * 0.52 + pad * 1.07, z: 0 });
+      mesh(surface(topRings, 26, { capBottom: true, capTop: true }), topM, {});
+    }
+    if (botItem) {
+      const hipRings = [
+        { y: 0.470 * H, rx: R.hipRX * 1.02 + pad, rz: R.hipRZ * 0.98 + pad, z: -0.011 * H * (1 + 0.4 * dw) },
+        { y: 0.505 * H, rx: R.hipRX + pad, rz: R.hipRZ + pad, z: -0.013 * H * (1 + 0.4 * dw) },
+        { y: 0.552 * H, rx: R.hipRX * 0.94 + pad, rz: R.hipRZ * 0.91 + pad, z: -0.006 * H },
+        { y: 0.612 * H, rx: R.waistRX + pad, rz: R.waistRZ + pad, z: bellyZ }
+      ];
+      mesh(surface(hipRings, 24, { capBottom: true, capTop: true }), botM, {});
+      for (const s of [-1, 1]) {
+        const g = surface(legRingsLow.map((q) => ({
+          y: q.y, rx: q.rx + pad * 0.95, rz: q.rz + pad * 0.95, z: q.z
+        })), 20, { capBottom: true, capTop: true });
+        mesh(g, botM, { p: [s * legX, 0, 0] });
+      }
+    }
+
+    /* ============ 9. 配饰 ============ */
+    if (accItem) {
+      const isGlass = accItem.kind === 'glasses';
+      const accM = mat(accItem.color || '#22222a', {
+        roughness: isGlass ? 0.35 : 0.72,
+        metalness: isGlass ? 0.25 : 0.05
+      });
+      const eyeY = 0.926 * H;
+      if (isGlass) {
+        for (const s of [-1, 1]) {
+          mesh(new THREE.TorusGeometry(0.0125 * H, 0.0022 * H, 8, 22), accM, {
+            p: [s * 0.0215 * H, eyeY, (faceZ(0.926, 0.0215) - 0.0018) * H]
+          });
+        }
+        mesh(new THREE.BoxGeometry(0.0105 * H, 0.0020 * H, 0.0020 * H), accM, {
+          p: [0, eyeY + 0.0006 * H, (faceZ(0.926, 0) - 0.0024) * H]
+        });
+        for (const s of [-1, 1]) {                                    // 镜腿
+          mesh(new THREE.BoxGeometry(0.0018 * H, 0.0018 * H, 0.0420 * H), accM, {
+            p: [s * 0.0455 * H, eyeY + 0.0012 * H, -0.0150 * H]
+          });
+        }
+      } else {                                                        // 帽子
+        mesh(new THREE.CylinderGeometry(0.0480 * H, 0.0500 * H, 0.0380 * H, 24), accM, {
+          p: [0, 0.9680 * H, 0]
+        });
+        mesh(new THREE.CylinderGeometry(0.0700 * H, 0.0700 * H, 0.0075 * H, 28), accM, {
+          p: [0, 0.9500 * H, 0.0180 * H]
+        });
+      }
+    }
+
+    /* ---------- 相机适配身高 ---------- */
+    camDist = 1.45 + H * 0.86;
+    camHeight = Y.shldr * 0.94;
+    lookY = H * 0.52;
     camera.position.set(0, camHeight, camDist);
     camera.lookAt(0, lookY, 0);
   }
 
-  /* ---------- 场景初始化 ---------- */
+  /* ============================================================
+     场景初始化
+     ============================================================ */
   function init() {
     const container = document.getElementById('avatar-canvas');
     if (!container || initialized) return;
@@ -151,26 +501,34 @@
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(w, hgt);
+    if ('outputColorSpace' in renderer && THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
+    else if ('outputEncoding' in renderer && THREE.sRGBEncoding) renderer.outputEncoding = THREE.sRGBEncoding;
+    if ('toneMapping' in renderer && THREE.ACESFilmicToneMapping) {
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+    }
     container.appendChild(renderer.domElement);
 
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(38, w / hgt, 0.1, 50);
+    camera = new THREE.PerspectiveCamera(36, w / hgt, 0.1, 60);
 
-    // 暗场打光：半球冷光 + 主光 + 青色轮廓光，人物从黑底中浮出
-    scene.add(new THREE.HemisphereLight(0x9fb4d8, 0x0a0c12, 0.85));
-    const key = new THREE.DirectionalLight(0xffffff, 1.05); key.position.set(2.2, 3.4, 2.6); scene.add(key);
-    const rim = new THREE.DirectionalLight(0x4cc9f0, 0.55); rim.position.set(-2.4, 1.6, -2); scene.add(rim);
-    const fill = new THREE.DirectionalLight(0x3ce8b0, 0.25); fill.position.set(0.6, 0.8, -2.6); scene.add(fill);
+    // 暗场三点打光：主光（前上左）+ 冷补光（右）+ 青色轮廓光（后）
+    scene.add(new THREE.HemisphereLight(0x9ab2d8, 0x0a0c12, 0.72));
+    const key = new THREE.DirectionalLight(0xfff4e8, 1.35); key.position.set(1.8, 3.6, 2.8); scene.add(key);
+    const fill = new THREE.DirectionalLight(0x8fb4e8, 0.42); fill.position.set(-2.8, 1.2, 1.6); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0x3ce8b0, 0.85); rim.position.set(-1.4, 2.0, -3.0); scene.add(rim);
+    const rim2 = new THREE.DirectionalLight(0x4cc9f0, 0.35); rim2.position.set(2.2, 1.0, -2.2); scene.add(rim2);
 
+    // 舞台：圆盘 + 信号青光环
     const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(0.85, 40),
-      new THREE.MeshStandardMaterial({ color: 0x0e1118, roughness: 0.95 })
+      new THREE.CircleGeometry(0.85, 48),
+      new THREE.MeshStandardMaterial({ color: 0x0d1017, roughness: 0.96 })
     );
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.85, 0.9, 48),
-      new THREE.MeshBasicMaterial({ color: 0x3ce8b0, transparent: true, opacity: 0.45, side: THREE.DoubleSide })
+      new THREE.RingGeometry(0.85, 0.895, 64),
+      new THREE.MeshBasicMaterial({ color: 0x3ce8b0, transparent: true, opacity: 0.42, side: THREE.DoubleSide })
     );
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.002;
     scene.add(ring);
@@ -180,18 +538,21 @@
     build();
 
     /* 交互：拖动旋转 / 滚轮缩放 */
-    container.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; container.setPointerCapture(e.pointerId); });
+    container.addEventListener('pointerdown', (e) => {
+      dragging = true; lastX = e.clientX; lastY = e.clientY;
+      container.setPointerCapture(e.pointerId);
+    });
     container.addEventListener('pointermove', (e) => {
       if (!dragging) return;
       modelGroup.rotation.y += (e.clientX - lastX) * 0.011;
-      camHeight = THREE.MathUtils.clamp(camHeight - (e.clientY - lastY) * 0.003, 0.2, 2.2);
+      camHeight = clamp(camHeight - (e.clientY - lastY) * 0.003, 0.2, 2.4);
       lastX = e.clientX; lastY = e.clientY;
     });
     container.addEventListener('pointerup', () => (dragging = false));
     container.addEventListener('pointercancel', () => (dragging = false));
     container.addEventListener('wheel', (e) => {
       e.preventDefault();
-      camDist = THREE.MathUtils.clamp(camDist + e.deltaY * 0.0022, 1.4, 6);
+      camDist = clamp(camDist + e.deltaY * 0.0022, 1.4, 6);
     }, { passive: false });
 
     window.addEventListener('resize', onResize);
@@ -200,18 +561,20 @@
     (function animate() {
       raf = requestAnimationFrame(animate);
       const t = clock.getElapsedTime();
+      // 呼吸：胸廓轻微扩张
       if (torsoMesh) {
-        torsoMesh.scale.y = 1 + Math.sin(t * 1.7) * 0.014; // 呼吸
-        torsoMesh.scale.z = baseZ;
+        const b = 1 + Math.sin(t * 1.55) * 0.009;
+        torsoMesh.scale.set(b, 1 + Math.sin(t * 1.55) * 0.004, b);
       }
-      modelGroup.position.y = Math.sin(t * 1.7) * 0.002;
+      // 微幅重心摆动
+      modelGroup.position.y = Math.sin(t * 1.55) * 0.0018;
+      modelGroup.rotation.z = Math.sin(t * 0.62) * 0.0055;
       camera.position.set(0, camHeight, camDist);
       camera.lookAt(0, lookY, 0);
       renderer.render(scene, camera);
     })();
   }
 
-  let raf = 0;
   function onResize() {
     const container = document.getElementById('avatar-canvas');
     if (!container || !renderer) return;
@@ -221,7 +584,9 @@
     camera.updateProjectionMatrix();
   }
 
-  /* ---------- 面板控件渲染 ---------- */
+  /* ============================================================
+     控制面板（体型 / 衣橱）—— 与数据契约保持不变
+     ============================================================ */
   const SLOT_NAMES = { top: '上装', bottom: '下装', shoes: '鞋履', accessory: '配饰' };
 
   function render() {
@@ -254,6 +619,7 @@
             .map(([v, n]) => `<option value="${v}" ${a.hairStyle === v ? 'selected' : ''}>${n}</option>`).join('')}
         </select>
       </div>
+      <div class="dim" style="margin-top:10px">比例按标准人体测量映射：体重驱动腰/胸/四肢围度，肌肉量驱动肩宽与胸厚度。</div>
     </div>
 
     <div class="card">
@@ -269,7 +635,7 @@
             <option value="shoes">鞋履</option><option value="accessory">配饰</option>
           </select>
           <select id="w-kind" hidden><option value="hat">帽子</option><option value="glasses">眼镜</option></select>
-          <input type="color" id="w-color" value="#7c5cff">
+          <input type="color" id="w-color" value="#5b6472">
           <button class="btn primary mini" id="w-add">＋录入</button>
         </div>
       </div>
@@ -284,7 +650,6 @@
     if (!el || el.dataset.bound) return;
     el.dataset.bound = '1';
 
-    // 参数滑杆 / 颜色 / 发型
     el.addEventListener('input', (e) => {
       const p = e.target.dataset.p;
       if (!p) return;
@@ -296,7 +661,6 @@
     });
     el.addEventListener('change', (e) => { if (e.target.dataset.p) GL.changed(); });
 
-    // 穿脱 / 删除 / 穿搭
     el.addEventListener('click', (e) => {
       const a = A();
       const equip = e.target.closest('[data-equip]');
@@ -318,7 +682,11 @@
       const apply = e.target.closest('[data-apply-outfit]');
       if (apply) {
         const o = a.outfits.find((x) => x.id === apply.dataset.applyOutfit);
-        if (o) { a.outfit = Object.assign({ top: null, bottom: null, shoes: null, accessory: null }, o.slots); GL.toast('已换上「' + o.name + '」'); GL.changed(); build(); }
+        if (o) {
+          a.outfit = Object.assign({ top: null, bottom: null, shoes: null, accessory: null }, o.slots);
+          GL.toast('已换上「' + o.name + '」');
+          GL.changed(); build();
+        }
         return;
       }
       const delO = e.target.closest('[data-del-outfit]');
@@ -341,7 +709,6 @@
         GL.changed(); build();
         return;
       }
-      if (e.target.id === 'w-slot') { /* noop */ }
       if (e.target.id === 'outfit-save') {
         const name = prompt('给这套穿搭起个名字：');
         if (!name) return;
@@ -351,14 +718,13 @@
       }
     });
 
-    // 配饰类型联动
     el.addEventListener('change', (e) => {
       if (e.target.id === 'w-slot') el.querySelector('#w-kind').hidden = e.target.value !== 'accessory';
     });
   }
 
   GL.hooks.push(() => { render(); });
-  GL.initAvatar = function () { init(); };                       // 只建场景，控制面板单独渲染
+  GL.initAvatar = function () { init(); };
   GL.renderAvatarCtrl = function () { render(); bind(); };
   GL.rebuildAvatar = function () { if (initialized && modelGroup) build(); };
 })();
