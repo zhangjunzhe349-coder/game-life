@@ -324,8 +324,16 @@ b { font-weight: 700; }
   box-shadow: var(--sh-2);
   overflow: hidden;
 }
-#avatar-canvas { position: absolute; inset: 0; }
-#avatar-canvas canvas { display: block; }
+/* 分层 2D 立绘：SVG 自适应容器，留出上下提示带 */
+#portrait-svg {
+  position: absolute;
+  inset: 34px 0 52px;
+  width: 100%; height: calc(100% - 86px);
+  display: block;
+  /* 立绘本身用代码绘制，无需 GPU 合成开销 */
+  shape-rendering: geometricPrecision;
+}
+#portrait-svg > g { will-change: auto; }
 .avatar-fallback { padding: var(--s7) var(--s5); color: var(--muted); text-align: center; }
 /* 四角括号：HUD 破格元素 */
 .stage::before, .stage::after {

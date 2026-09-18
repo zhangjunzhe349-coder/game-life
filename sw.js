@@ -1,9 +1,10 @@
-const CACHE = 'gamelife-v4';
+const CACHE = 'gamelife-v5';
 const ASSETS = [
   './',
   'index.html',
   'css/style.css',
   'js/storage.js',
+  'js/portrait.js',
   'js/avatar.js',
   'js/physiology.js',
   'js/attributes.js',

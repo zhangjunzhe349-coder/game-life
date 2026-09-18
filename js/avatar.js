@@ -1,16 +1,21 @@
-/* ============ Game Life · 3D 人物形象 & AI 衣橱 ============
-   v1.3.0 模型重建（方案①：程序化精细模型）
-   从「20 个基本体拼装」升级为「截面放样 + 分段关节 + 面部特征」
+/* ============ Game Life · 体型与衣橱控制面板 ============
+   v1.4.0：中央形象改为「分层 2D 立绘」（js/portrait.js）。
+   本文件退化为纯「体型参数 + 衣橱单品」的数据与交互层，
+   与立绘共用 GL.state.avatar 数据契约，改完走 GL.changed() 即可。
 
-   人体比例取自标准人体测量学（以身高 H 为单位）：
-     肩宽 0.252H · 胸宽 0.183H / 胸厚 0.126H · 腰宽 0.160H / 腰厚 0.114H
-     髋宽 0.189H · 大腿 r=0.050H · 小腿 r=0.034H · 上臂 r=0.029H
-     颌下 0.862H · 眼线 0.926H · 肩线 0.820H · 胯 0.475H · 膝 0.280H
-
-   保持：体型参数驱动 / 衣橱四槽位 / 完全离线 / 零外部资源
+   ── 历史 ──
+   v1.3.0 曾用 Three.js 做程序化 3D 模型（截面放样 + 分段关节）。
+   该渲染段仍保留在文件下半部分但已休眠（见 init()），
+   需要时用 `git checkout v1.3.0 -- game-life/` 可整体回滚。
    ============================================================ */
 (function () {
   'use strict';
+  /* ============ 体型与衣橱控制面板（v1.4.0） ============
+     职责拆分：本文件只负责「体型参数 + 衣橱单品」的数据与交互 UI。
+     中央人物形象由 js/portrait.js 的 SVG 分层立绘渲染 —— 二者共享
+     GL.state.avatar 同一份数据契约，任何改动都会走 GL.changed() 触发
+     立绘重绘，因此本文件无需知道立绘如何画。
+     下方 3D 渲染段（build / init）保留但已休眠，见 init() 注释。 */
 
   let renderer, scene, camera, modelGroup, torsoMesh;
   let camDist = 3.4, raf = 0;
@@ -489,12 +494,12 @@
      场景初始化
      ============================================================ */
   function init() {
+    // v1.4.0 起中央舞台改为「分层 2D 立绘」（见 js/portrait.js）。
+    // 3D 渲染路径整体休眠：不再建 WebGL 上下文、不再依赖 Three.js CDN。
+    // 保留代码以便随时用 git checkout v1.3.0 回滚，或后续做「3D / 立绘」双模式开关。
+    if (typeof THREE === 'undefined') return;   // 无 Three.js 时静默跳过
     const container = document.getElementById('avatar-canvas');
     if (!container || initialized) return;
-    if (typeof THREE === 'undefined') {
-      container.innerHTML = '<div class="avatar-fallback">3D 引擎加载失败（需联网加载 Three.js）。<br>其余功能不受影响，联网后刷新即可恢复。</div>';
-      return;
-    }
     initialized = true;
 
     const w = container.clientWidth || 600, hgt = container.clientHeight || 400;

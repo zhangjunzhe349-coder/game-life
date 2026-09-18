@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.3.0';
+  const APP_VERSION = '1.4.0';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 工具：今日饮水 ---------- */
@@ -48,10 +48,14 @@
     const el = document.getElementById('stage-base');
     if (!el) return;
     const a = GL.state.avatar;
+    const style = HAIR_NAMES[a.hairStyle] || a.hairStyle;
     el.innerHTML = `
       <span>身高 <b>${a.height}</b>cm · 体重 <b>${a.weight}</b>kg · 肌肉 <b>${a.muscle}</b></span>
+      <span>发型 <b>${style}</b> · 衣橱 <b>${(a.wardrobe || []).length}</b> 件</span>
       <span>今日饮水 <b>${todayMl()}</b>ml · 距上次 <b>${lastDrink() ? GL.fmtRel(lastDrink()) : '未记录'}</b></span>`;
   }
+
+  const HAIR_NAMES = { short: '短发', buzz: '寸头', long: '长发', ponytail: '马尾', bald: '光头' };
 
   /* ---------- 入场序列 ---------- */
   function reveal(scope) {
@@ -168,7 +172,7 @@
     <div class="card">
       <div class="card-head"><span class="card-title">ℹ️ 关于</span><span class="card-hint">LOCAL-FIRST</span></div>
       <div class="dim">
-        Game Life v${APP_VERSION} · 3D 形象 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度<br>
+        Game Life v${APP_VERSION} · 人物立绘 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度<br>
         本地优先 · 无需登录 · 数据自主可控。后续可拓展：智能硬件自动同步、多端云同步、照片生成真实比例模型。
       </div>
     </div>`;
