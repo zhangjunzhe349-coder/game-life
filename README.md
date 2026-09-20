@@ -30,12 +30,60 @@ game-life/
 ├── js/app.js               # 入口：导航、顶栏读数、设置、启动流程
 ├── tools/verify-portrait.js # 无头图层校验：立绘 36 用例
 ├── tools/verify-wiring.js  # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / sw 版本
-├── tools/browser-check.js  # 浏览器冒烟：真跑页面 + 抓运行时异常 + 断言渲染产物 + 出 PNG
+├── tools/verify-migrate.js # 数据迁移校验：v1 → v2 分组体系（24 项断言，防丢历史）
+├── tools/browser-check.js  # 浏览器冒烟：真跑页面 + 抓异常 + 渲染断言 + 交互测试 + 面板明细 + 出 PNG
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
 ├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
 ├── sw.js                   # Service Worker（离线缓存）
 └── manifest.webmanifest    # PWA 安装配置
 ```
+
+## 属性与技能体系（v1.5.0）
+
+数据定义在 `js/storage.js` 顶部的 `ATTR_GROUPS` / `SKILL_GROUPS` / `ATTR_DEFS` / `SKILL_DEFS`，
+改体系只动这几处，视图层会自动跟着分组渲染。
+
+```
+属性（3 大类 14 项）            技能（5 大类 13 项）
+├─ ❤️ 生理值 (6)               ├─ 💪 生理 (2)   肌肉量 · 心肺
+│   喉咙 · 鼻腔 · 困倦度        ├─ 🗣 语言 (2)   写作能力 · 表达能力
+│   运动度 · 睡眠 · 饮食        ├─ 💬 社交 (2)   small talk · 自信值
+├─ 🧠 精神力 (5)               ├─ 🪞 外貌 (4)   皮肤 · 穿搭 · 发型 · 牙齿
+│   欲望值 · 情绪值 · 社交度    └─ 🧭 其他 (3)   阅历 · 眼界 · 审美力
+│   稳定度 · 盼头值
+└─ 🌀 熵值 (3)  多巴胺需求 · 混乱值 · 嘈杂值
+```
+
+### 极性（polarity）—— 决定刻度语义与配色
+
+这是本体系最容易读错的地方。每个属性项有 `polarity` 字段：
+
+| 极性 | 含义 | 配色 | 适用 |
+|---|---|---|---|
+| `pos` | 越高越好 | 青色 | 多数指标（喉咙、运动度、欲望值…） |
+| `neg` | **越低越好** | 红色 | 熵值三项、困倦度 |
+| `mid` | **中间最好** | 琥珀 + 理想区间标记 | 社交度（过低生理级不适）、稳定度（过高陷入麻木） |
+
+三个连带规则：
+
+1. **等级文案跟着极性走**。`GL.attrLevelsFor(polarity)` 给 `neg` 项生成的是
+   `😌 清爽 / 🙂 平稳 / 😐 一般 / 😣 偏高 / 🔥 过载` —— 对困倦度显示「🔥 充沛」是反的。
+2. **初始值也跟着极性走**（`START_VALUE`）。负向项从 30 起步，否则新用户打开会看到
+   一条红色长条，误以为状态很糟。
+3. **总览分对负向项取反**（`GL.overallScore()`）。熵值低是好事，若直接计入平均会把总分拉低 ——
+   这是负向指标最容易踩的统计陷阱。组内均值则显示原始水平（短条 = 熵值低 = 好）。
+
+### 界面呈现：三级视觉权重
+
+14 项要放进原来 8 项的地方，靠的不是缩小，而是分层：
+
+| 层级 | 元素 | 规格 |
+|---|---|---|
+| 1 | 大类标题 `.ag-head` | 正常字号 + 组均值 + 汇总条，**承担识别** |
+| 2 | 细刻度行 `.ag-row` | 11px 灰字 + 等宽数字 + 3px 细条，一行约 22px |
+| 3 | 微调 `.ag-tune` | **点小项才展开**，不操作时不占地方 |
+
+组标题可点击折叠，状态存 `GL.state.ui.attrCollapsed`（刷新后保持）。
 
 ## 分层 2D 立绘说明（v1.4.0）
 
@@ -75,14 +123,15 @@ const px = (r) => r * KX;
 > **已知坑**：数组里**每个点必须 6 个元素**（两个控制点 + 一个锚点）。写成 8 个会产出
 > `undefined undefined` 的路径而不报错，必须靠下面的校验工具兜住。
 
-### 三层校验
+### 四层校验
 
-改动 `portrait.js` / `index.html` / `sw.js` / `app.js` 后依次运行：
+改动 `portrait.js` / `attributes.js` / `skills.js` / `storage.js` / `index.html` / `sw.js` / `app.js` 后依次运行：
 
 ```bash
-node tools/verify-portrait.js   # 36 用例图层校验：6 体型 × 5 发型 + 衣橱/肤色/裙装组合
-node tools/verify-wiring.js     # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / sw 清单与版本
-node tools/browser-check.js     # 浏览器冒烟：真跑一遍页面，抓运行时异常 + 断言渲染产物 + 出图
+node tools/verify-portrait.js   # 静态：立绘 36 用例图层校验
+node tools/verify-wiring.js     # 静态：脚本清单 / GL.* 提供者 / 宿主节点 / sw 版本
+node tools/verify-migrate.js    # 静态：数据迁移 v1→v2（防历史记录丢失）
+node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互测试 + 出 PNG
 ```
 
 - `verify-portrait.js`：无头 DOM 桩件跑一遍 `drawAll()`，检查坏值 `NaN/undefined`、
@@ -90,27 +139,42 @@ node tools/browser-check.js     # 浏览器冒烟：真跑一遍页面，抓运�
 - `verify-wiring.js`：补前者的盲区 —— 脚本顺序必须为
   `storage → avatar → portrait → physiology → attributes → skills → life → app`，
   16 个宿主节点齐全、`#portrait-svg` 的 `viewBox` 与画布一致、无 Three.js CDN 残留、
-  **`app.js` 调用的每个 `GL.*` 都有提供者**（见下方事故复盘）、`sw.js` 的 `ASSETS` 完整且缓存版本 ≥ v6。
-- `browser-check.js`（**最贴近真实的一层**）：内置静态服务器 + CDP 驱动真实浏览器跑一遍，
-  抓 `pageerror` / `console.error`，并断言「立绘 path 数 ≥ 30」「`.rv.in === .rv`」「卡片数 ≥ 5」等
-  只有真渲染才能验证的状态，同时输出整页与立绘区域 PNG。
+  **每个模块调用的 `GL.*` 都有提供者**、`sw.js` 的 `ASSETS` 完整且缓存版本 ≥ v7。
+- `verify-migrate.js`：桩件跑 `storage.js`，断言迁移后**历史记录仍在**
+  （`写作能力 xp 250` 要活着、旧名 `small talk闲聊能力` 要能配对、外貌四项要移入技能、
+  旧项要淘汰、重复 load 要幂等）。迁移出错是**静默丢数据**，不会报错，必须显式断言。
+- `browser-check.js`（**最贴近真实的一层**）：内置静态服务器 + CDP 驱动真实浏览器，
+  抓 `pageerror` / `console.error`，断言只有真渲染才有的状态
+  （立绘 path 数、`.rv.in === .rv`、属性 3 组 14 行、负向行 4 个…），
+  **并真点一遍新交互**（折叠、＋1 步进、−1 还原、折叠状态持久化、极性文案方向），
+  输出各 tab 的 PNG，并在结尾打印**属性面板明细**（每组均值 + 每行「名称 数值」，负向标 `[-]`、
+  双向标 `[~]`）。这不是断言，是给人眼的**地面真值** —— 缩略图看错文案时以它为准。
   依赖 `ws`：`cd C:/Users/ZHANG/.workbuddy/binaries/node/workspace && npm i ws`，
   然后 `NODE_PATH=<该 node_modules> node tools/browser-check.js`。
 
-#### 为什么需要第三层（v1.4.2 白屏事故复盘）
+#### 为什么静态校验不够（两次事故复盘）
 
-v1.4.0 改造时 `index.html` 漏掉了 `<script src="js/avatar.js">`，而 `app.js` 的 `start()` 里在调
-`GL.initAvatar()`。于是：
+**v1.4.2 白屏**：`index.html` 漏了 `<script src="js/avatar.js">`，而 `app.js` 的 `start()` 在调
+`GL.initAvatar()` → 抛 `TypeError` 中断启动 → 排在后面的 `reveal()` 没跑 →
+所有 `.rv` 元素永久停在 `.rv { opacity: 0 }` → **整页白屏**。
+当时 `verify-portrait` 与 `verify-wiring` **全绿**。
 
-1. `start()` 在 `GL.initAvatar()` 处抛 `TypeError`，**后续语句全部中断**；
-2. 排在后面的 `reveal()` 从未执行，所有 `.rv` 元素永久停在 `.rv { opacity: 0 }`；
-3. 结果：页面全黑空白，只有背景网格和底栏——**一个漏掉的 `<script>`，整页白屏**。
+**v1.5.0 交互失效（正是上一条修复引入的回归）**：把首屏渲染改成走 `GL.changed()` 后，
+各模块只注册了 `render` 而没注册 `bind()` —— 事件委托从未绑定。
+页面能看、点不动，**两种静态校验依然全绿**。
 
-关键教训：**`verify-portrait` 与 `verify-wiring` 当时全绿**。它们是静态分析，
-只查"文件内容对不对"，查不到"页面跑起来会不会崩"。所以补了 `browser-check.js`，
-并在 `verify-wiring.js` 里加了「`GL.*` 提供者」检查。
-同时 `app.js` 的 `start()` 改为 `step()` 逐步兜错 + `reveal()` 超时兜底 —— 现在任何一个模块出事，
-都不会再让整页白屏。
+两条教训指向同一结论：**静态分析查不出「页面跑起来会不会崩、点了有没有反应」。**
+所以现在：
+
+- `start()` 内每步都走 `step()` 包裹，任何模块出事不再连累整页；
+- `reveal()` 有 1.2s 超时兜底，绝不留下白屏；
+- **各模块的 `GL.hooks.push` 一律推 `renderAll = () => { render(); bind(); }`**，
+  因为 `GL.changed()` 是唯一重渲染入口，只推 `render` 就等于永不绑定事件；
+- `browser-check.js` 里有一组**交互测试**，专门守这个洞。
+
+**极性文案反向（v1.5.0 引入极性语义后新增的隐患）**：`neg` 项若沿用 `pos` 的等级文案，
+会对着「困倦度 30」（其实是清爽）显示「🔥 充沛」，纯属反向误导。`tuneNote()` 已改为负向给
+「越低越好」、双向给「中间最好」，并在 `browser-check.js` 里加了三项断言锁死这个方向。
 
 ### 3D 版仍在，但已休眠
 
@@ -169,3 +233,4 @@ git stash && git checkout v1.1.0
 | v1.4.0 | 2026-09-18 | 中央形象由 Three.js 3D 模型切换为**纯代码矢量 SVG 分层立绘**（方案④）：9 图层合成、零外部依赖、完全离线；建立 `H = 940` / `yOf(f)` / `px(r)` 统一坐标基准；3D 渲染段休眠保留（`git checkout v1.3.0 -- .` 可回滚）；新增 `verify-portrait` / `verify-wiring` / `render-preview` 三件校验工具 |
 | v1.4.1 | 2026-09-18 | 文档收尾：README 补齐分层立绘说明与校验流程 |
 | v1.4.2 | 2026-09-18 | **修复整页白屏事故**：index.html 漏加载 `js/avatar.js` → `app.js` 调 `GL.initAvatar()` 抛异常中断启动 → `reveal()` 未执行 → 所有 `.rv` 永久 `opacity:0`。修法：补回脚本 + `start()` 改 `step()` 逐步兜错 + `reveal()` 超时兜底；新增 `tools/browser-check.js` 浏览器冒烟测试，`verify-wiring.js` 增补「`GL.*` 提供者」检查；顺带打磨立绘三处观感（领口改圆领、衣摆不再露肤色、鞋头明显朝外）；sw 缓存升 v6 |
+| v1.5.0 | 2026-09-18 | **属性与技能改为分组体系**：属性 3 大类 14 项（生理值 / 精神力 / 熵值），技能 5 大类 13 项（生理 / 语言 / 社交 / 外貌 / 其他），数据定义收敛到 `storage.js` 的 `ATTR_DEFS` / `SKILL_DEFS`。属性面板改三级视觉权重（大类标题 → 细刻度行 → 点击展开微调），14 项一屏装下且组可折叠。引入**极性语义**：负向指标（熵值 3 项 + 困倦度）红色反转、双向指标（社交度、稳定度）标理想区间，等级文案与初始值均随极性走，`GL.overallScore()` 对负向项取反。新增 `tools/verify-migrate.js`（24 项迁移断言，防历史丢失）。**修复交互失效回归**：各模块 `GL.hooks` 只注册了 `render` 未带 `bind()`，导致「页面能看、点不动」；`browser-check.js` 增加交互测试 + 极性文案方向断言（36 项）+ 属性面板明细输出。sw 缓存升 v7 |

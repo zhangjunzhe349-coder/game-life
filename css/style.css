@@ -247,38 +247,169 @@ b { font-weight: 700; }
 .wing-title::before { content: "▚ "; color: var(--accent); letter-spacing: 0; }
 .wing-note { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--faint); font-variant-numeric: tabular-nums; }
 
-/* —— 属性行 —— */
-.attr-row { display: grid; gap: 6px; padding: var(--s2) 0; }
-.attr-row + .attr-row { border-top: 1px dashed var(--line); }
-.attr-top { display: flex; align-items: baseline; gap: var(--s2); }
-.attr-name { font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0.04em; flex: 1; }
-.attr-lv {
-  font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.06em;
-  padding: 2px 6px; border-radius: var(--r-xs);
-  background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);
-  white-space: nowrap;
+/* ============================================================
+   属性面板：三级视觉权重
+   ------------------------------------------------------------
+   14 个指标要挤进原来 8 个指标的地方，靠的不是"缩小"，而是**分层**：
+     第 1 级 大类标题  .ag-head  —— 正常字号 + 组均值，承担识别
+     第 2 级 细刻度行  .ag-row   —— 11px 灰字 + 3px 细条，一行约 22px
+     第 3 级 调节      .ag-tune  —— 点开才出现，平时不占地方
+   极性配色：pos 青 / neg 红 / mid 琥珀，见下方 .neg .mid 分支
+   ============================================================ */
+.ag-list { display: flex; flex-direction: column; gap: var(--s4); }
+
+/* —— 第 1 级：大类 —— */
+.ag { display: flex; flex-direction: column; gap: 7px; }
+.ag-head {
+  appearance: none; -webkit-appearance: none;
+  display: flex; align-items: center; gap: var(--s2);
+  width: 100%; min-height: 26px; padding: 0;
+  background: none; border: 0; font: inherit; color: inherit;
+  text-align: left; cursor: pointer;
+  border-radius: var(--r-xs);
+  transition: color var(--dur-fast) ease-out;
 }
-.attr-val-line { display: flex; align-items: flex-end; gap: var(--s2); }
-.attr-num {
-  font-family: var(--font-display); font-weight: 700; font-size: var(--fs-2xl);
-  line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+.ag-head:hover .ag-name { color: var(--accent); }
+.ag-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ag-glyph { font-size: 14px; line-height: 1; flex: none; }
+.ag-name {
+  flex: none;
+  font-family: var(--font-display); font-weight: 700;
+  font-size: var(--fs-sm); letter-spacing: 0.1em;
+  transition: color var(--dur-fast) ease-out;
 }
-.attr-max { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--faint); padding-bottom: 3px; }
-.meter { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
-.meter > i {
-  display: block; height: 100%; border-radius: 999px;
+.ag-tag {
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.08em; color: var(--faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.ag-mean {
+  margin-left: auto; padding-left: var(--s2);
+  font-family: var(--font-display); font-weight: 700;
+  font-size: var(--fs-md); line-height: 1;
+  letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.ag-chev {
+  flex: none; font-size: var(--fs-2xs); color: var(--faint);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.ag.shut .ag-chev { transform: rotate(-90deg); }
+/* 负向组（熵值）：整组换红，一眼区分「越高越糟」 */
+.ag.neg .ag-head:hover .ag-name { color: var(--danger); }
+.ag.neg .ag-mean { color: var(--danger); }
+
+.ag-bar {
+  display: block; height: 3px; border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.07); overflow: hidden;
+}
+.ag-bar > i {
+  display: block; height: 100%; border-radius: var(--r-pill);
   background: var(--grad-accent);
   transition: width var(--dur-base) var(--ease-out);
 }
-.stepper { display: flex; gap: var(--s1); margin-left: auto; }
-.stepper button {
-  width: 30px; height: 30px; border-radius: var(--r-xs);
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
-  font-size: 15px; line-height: 1; display: grid; place-items: center;
-  transition: all var(--dur-fast) ease-out;
+.ag.neg .ag-bar > i { background: var(--danger); }
+
+/* 折叠：max-height 过渡。属性组最多 6 行（约 150px），500px 余量充足 */
+.ag-items {
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 500px; opacity: 1; overflow: hidden;
+  transition: max-height var(--dur-base) var(--ease-out), opacity var(--dur-fast) ease-out;
 }
-.stepper button:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.stepper button:active { transform: scale(0.92); }
+.ag.shut .ag-items { max-height: 0; opacity: 0; }
+
+/* —— 第 2 级：细刻度行（真 button，键盘 Enter/Space 自动可用） —— */
+.ag-row {
+  appearance: none; -webkit-appearance: none;
+  background: none; border: 0; font: inherit; color: inherit;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center; gap: var(--s2);
+  padding: 3px 5px; margin: 0 -5px;
+  border-radius: var(--r-xs); cursor: pointer; text-align: left;
+  transition: background var(--dur-fast) ease-out;
+}
+.ag-row:hover { background: rgba(255, 255, 255, 0.035); }
+.ag-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ag-row.tune-open { background: var(--accent-soft); }
+.ag-label { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.ag-t {
+  font-size: var(--fs-xs); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--dur-fast) ease-out;
+}
+.ag-row:hover .ag-t { color: var(--text); }
+.ag-sub {
+  flex: none; font-size: var(--fs-2xs); color: var(--faint);
+  white-space: nowrap;
+}
+.ag-num {
+  font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 500;
+  font-variant-numeric: tabular-nums; text-align: right;
+  min-width: 22px; color: var(--text);
+}
+.ag-track {
+  position: relative; display: block; flex: none;
+  width: 56px; height: 3px; border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.07);
+}
+.ag-track > i {
+  display: block; height: 100%; border-radius: var(--r-pill);
+  background: var(--accent);
+  transition: width var(--dur-base) var(--ease-out);
+}
+/* 负向：数值越高越糟，条越长越警示 → 红 */
+.ag-row.neg .ag-num { color: var(--danger); }
+.ag-row.neg .ag-track > i { background: var(--danger); }
+/* 双向：中间最好，用琥珀 + 理想区间标记 */
+.ag-row.mid .ag-num { color: var(--xp); }
+.ag-row.mid .ag-track > i { background: var(--xp); }
+.ag-ideal {
+  position: absolute; top: -3px; bottom: -3px; left: 45%; width: 30%;
+  border-left: 1px solid rgba(255, 194, 75, 0.75);
+  border-right: 1px solid rgba(255, 194, 75, 0.75);
+  pointer-events: none;
+}
+
+/* —— 第 3 级：点开才出现的微调 —— */
+.ag-tune {
+  display: flex; align-items: center; gap: var(--s1);
+  padding: 5px 0 7px;
+  animation: agTuneIn var(--dur-fast) var(--ease-out) both;
+}
+@keyframes agTuneIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.ag-tune .btn.mini { min-width: 34px; height: 26px; padding: 0 6px; font-size: var(--fs-xs); }
+.ag-tune input[type="number"] { width: 58px; height: 26px; text-align: center; font-size: var(--fs-xs); }
+.ag-tune-note {
+  margin-left: auto; font-size: var(--fs-2xs); color: var(--faint);
+  letter-spacing: 0.06em; white-space: nowrap;
+}
+
+/* —— 技能页分组 —— */
+.sg + .sg { margin-top: var(--s5); }
+.sg-head {
+  display: flex; align-items: center; gap: var(--s2);
+  margin-bottom: var(--s3); padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+}
+.sg-glyph { font-size: 15px; line-height: 1; flex: none; }
+.sg-name {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: var(--fs-base); letter-spacing: 0.1em;
+}
+.sg-meta {
+  margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.14em; color: var(--faint); font-variant-numeric: tabular-nums;
+}
+.subhead {
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-items, .ag-bar > i, .ag-track > i, .ag-chev, .ag-tune { transition: none; animation: none; }
+}
 
 /* —— 生理：饮水环 —— */
 .hydro { display: flex; gap: var(--s4); align-items: center; padding: var(--s2) 0 var(--s3); }

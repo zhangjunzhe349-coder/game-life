@@ -16,52 +16,181 @@
   ];
 
   /* ============================================================
-     技能篇预设 —— 来自《【游戏人生(技能篇)】元技能与方法论》
-     状态：精力管理4个值（文档未逐一命名，采用精力管理经典四维，
-           可在属性面板自由改名）
+     技能篇 / 属性篇预设
+     来源：《【游戏人生(技能篇)】元技能与方法论》《【游戏人生(属性篇)】》
+
+     属性三大类：生理值 / 精神力 / 熵值
+     技能五大类：生理 / 语言 / 社交 / 外貌 / 其他
+
+     polarity（极性）决定刻度条的语义与配色，这是关键设计：
+       pos  越高越好   → 青色，条越长越好（多数指标）
+       neg  越低越好   → 红色，条越长越需要注意（熵值三项、困倦度）
+       mid  中间最好   → 琥珀，偏离理想区间的程度才是有意义的信号
+                        （用户原文：社交度「过低生理级不适」、
+                          稳定度「过高日复一日又会陷入麻木」）
+     用固定 key 作 id，而不是随机 uid —— 这样换版本时能对上旧数据、迁移历史。
      ============================================================ */
-  function docSkills() {
-    const mk = (name, emoji, actions) => ({
-      id: GL.uid(), name, emoji, xp: 0, xpPerLevel: 100,
-      actions: actions.map(([n, xp]) => ({ id: GL.uid(), name: n, xp })),
-      logs: []
-    });
-    return [
-      // == 语言 ==
-      mk('写作能力', '✍️', [['写作30分钟', 15], ['输出一篇文章', 40], ['修改润色', 10]]),
-      mk('口头表达能力', '🎤', [['刻意练习15分钟', 10], ['完整表达一次', 30], ['复述总结', 10]]),
-      // == 社交 ==
-      mk('small talk闲聊能力', '💬', [['主动破冰', 10], ['完成一段闲聊', 15], ['认识新朋友', 25]]),
-      // == 生理 ==
-      mk('力量', '💪', [['力量训练', 30], ['自重训练组', 15]]),
-      mk('敏捷', '🤸', [['敏捷/协调训练', 20], ['拉伸放松', 8]]),
-      // == 综合素养 ==
-      mk('阅历', '🧭', [['记录一次新经历', 15], ['与不同背景的人深聊', 20]]),
-      mk('眼界', '🔭', [['精读深度内容', 10], ['学一个新领域框架', 25]]),
-      mk('审美力', '🎨', [['分析一个优秀作品', 15], ['收集灵感', 10]])
-    ];
-  }
+
+  const ATTR_GROUPS = [
+    { id: 'physio', name: '生理值', emoji: '❤️', note: '身体基线' },
+    { id: 'mental', name: '精神力', emoji: '🧠', note: '心理状态' },
+    { id: 'entropy', name: '熵值', emoji: '🌀', note: '越低越好' },
+  ];
+
+  const SKILL_GROUPS = [
+    { id: 'physio', name: '生理', emoji: '💪' },
+    { id: 'lang', name: '语言', emoji: '🗣️' },
+    { id: 'social', name: '社交', emoji: '💬' },
+    { id: 'look', name: '外貌', emoji: '🪞' },
+    { id: 'misc', name: '其他', emoji: '🧭' },
+  ];
+
+  GL.ATTR_GROUPS = ATTR_GROUPS;
+  GL.SKILL_GROUPS = SKILL_GROUPS;
+
+  /* 属性项定义：[key, 显示名, 副标题, 组, 极性] */
+  const ATTR_DEFS = [
+    ['throat', '喉咙', '咽部', 'physio', 'pos'],
+    ['nose', '鼻腔', '鼻炎积水', 'physio', 'pos'],
+    ['drowse', '困倦度', '', 'physio', 'neg'],
+    ['move', '运动度', '活动半径', 'physio', 'pos'],
+    ['sleep', '睡眠', '早睡早起值', 'physio', 'pos'],
+    ['diet', '饮食', '少油少盐', 'physio', 'pos'],
+
+    ['desire', '欲望值', '动力感', 'mental', 'pos'],
+    ['mood', '情绪值', '', 'mental', 'pos'],
+    ['social', '社交度', '环境能量', 'mental', 'mid'],
+    ['stable', '稳定度', '过高会麻木', 'mental', 'mid'],
+    ['hope', '盼头值', '有奔头', 'mental', 'pos'],
+
+    ['dopamine', '多巴胺需求', '阈值', 'entropy', 'neg'],
+    ['chaos', '混乱值', '信息与选择', 'entropy', 'neg'],
+    ['noise', '嘈杂值', '环境噪音', 'entropy', 'neg'],
+  ];
+
+  /* 技能项定义：[key, 显示名, emoji, 组, 行动库] */
+  const SKILL_DEFS = [
+    ['muscle', '肌肉量', '💪', 'physio', [['力量训练', 30], ['自重训练组', 15]]],
+    ['cardio', '心肺', '🫁', 'physio', [['有氧训练', 25], ['间歇冲刺', 30]]],
+
+    ['writing', '写作能力', '✍️', 'lang', [['写作30分钟', 15], ['输出一篇文章', 40]]],
+    ['speaking', '表达能力', '🎤', 'lang', [['刻意练习15分钟', 10], ['完整表达一次', 30]]],
+
+    ['smalltalk', 'small talk', '💬', 'social', [['主动破冰', 10], ['完成一段闲聊', 15]]],
+    ['confidence', '自信值', '🦁', 'social', [['当众表达', 25], ['做一件不敢做的事', 35]]],
+
+    ['skin', '皮肤', '🧴', 'look', [['护肤流程', 10], ['规律作息一天', 15]]],
+    ['outfit', '穿搭', '👔', 'look', [['搭一套造型', 15], ['分析他人穿搭', 8]]],
+    ['hair', '发型', '💇', 'look', [['打理发型', 8], ['尝试新造型', 20]]],
+    ['teeth', '牙齿', '🦷', 'look', [['认真刷牙+牙线', 8], ['定期洗牙', 25]]],
+
+    ['experience', '阅历', '🧭', 'misc', [['记录一次新经历', 15], ['与不同背景的人深聊', 20]]],
+    ['vision', '眼界', '🔭', 'misc', [['精读深度内容', 10], ['学一个新领域框架', 25]]],
+    ['aesthetic', '审美力', '🎨', 'misc', [['分析一个优秀作品', 15], ['收集灵感', 10]]],
+  ];
+
+  /* 等级文案必须跟着极性走 —— 对「困倦度」显示「🔥 充沛」是反的。
+     pos：越高越好的常规描述
+     neg：越低越好的描述（熵值、困倦度）
+     mid：偏离理想区间的双向描述（社交度、稳定度） */
+  const LEVELS = {
+    pos: () => [
+      { min: 80, label: '🔥 充沛' }, { min: 60, label: '😊 良好' },
+      { min: 40, label: '😐 一般' }, { min: 20, label: '😕 低迷' },
+      { min: -999, label: '😫 糟糕' },
+    ],
+    neg: () => [
+      { min: 80, label: '🔥 过载' }, { min: 60, label: '😣 偏高' },
+      { min: 40, label: '😐 一般' }, { min: 20, label: '🙂 平稳' },
+      { min: -999, label: '😌 清爽' },
+    ],
+    mid: () => [
+      { min: 85, label: '🌊 过载' }, { min: 65, label: '🙂 尚可' },
+      { min: 45, label: '🎯 刚好' }, { min: 25, label: '🙂 尚可' },
+      { min: -999, label: '🌊 波动' },
+    ],
+  };
+
+  /* 初始值跟着极性走：负向指标（熵值、困倦度）的「好状态」是低值，
+     若一律给 60，新用户打开会看到一条红色长条，误以为状态很糟。
+     pos 60（中等偏上）/ neg 30（偏清爽）/ mid 55（贴近理想区间） */
+  const START_VALUE = { pos: 60, neg: 30, mid: 55 };
 
   function docAttributes() {
-    const mk = (name, emoji) => ({ id: GL.uid(), name: emoji + ' ' + name, min: 0, max: 100, value: 60, levels: GL.defLevels(), history: [] });
-    // 状态：精力管理 4 个值
-    const energy = [mk('体能精力', '⚡'), mk('情绪精力', '❤️'), mk('思维精力', '🧠'), mk('意志精力', '🧭')];
-    // == 外貌 ==
-    const look = [mk('皮肤', '🧴'), mk('穿搭', '👔'), mk('发型', '💇'), mk('牙齿', '🦷')];
-    return energy.concat(look);
+    return ATTR_DEFS.map(([key, name, sub, group, polarity]) => ({
+      id: key, name, sub, group, polarity,
+      min: 0, max: 100,
+      value: START_VALUE[polarity] !== undefined ? START_VALUE[polarity] : 60,
+      levels: (LEVELS[polarity] || LEVELS.pos)(), history: []
+    }));
   }
 
+  /* 供属性面板在切换刻度语义时同步等级文案 */
+  GL.attrLevelsFor = (polarity) => (LEVELS[polarity] || LEVELS.pos)();
+
+  /* 极性 → 中文说明，UI 与管理区共用 */
+  GL.POL_NAME = { pos: '越高越好', neg: '越低越好', mid: '中间最好' };
+
+  function docSkills() {
+    return SKILL_DEFS.map(([key, name, emoji, group, actions]) => ({
+      id: key, name, emoji, group, xp: 0, xpPerLevel: 100,
+      actions: actions.map(([n, xp]) => ({ id: GL.uid(), name: n, xp })),
+      logs: []
+    }));
+  }
+
+  /* 旧数据迁移表：把 v1.4.x 时代的中文名映射到新体系的固定 key。
+     匹配不上的旧项（如「体能精力」「力量」「敏捷」）按新体系淘汰。 */
+  const ATTR_MIGRATE = {
+    '喉咙(咽部)': 'throat', '喉咙（咽部）': 'throat', '喉咙': 'throat',
+    '鼻炎': 'nose', '鼻腔': 'nose',
+    '睡眠时长': 'sleep', '睡眠': 'sleep',
+  };
+  const SKILL_MIGRATE = {
+    '写作能力': 'writing',
+    '口头表达能力': 'speaking', '表达能力（口头）': 'speaking', '表达能力': 'speaking',
+    'small talk闲聊能力': 'smalltalk', 'small talk': 'smalltalk',
+    '阅历': 'experience', '眼界': 'vision', '审美力': 'aesthetic',
+    '肌肉量': 'muscle',
+  };
+
+  /* 去掉名称里的 emoji / 空格，才能跟迁移表比对 */
+  const bare = (s) => String(s || '').replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]/gu, '').trim();
+
+  /* 把旧数组里的 value / history 搬进新结构（按迁移表配对，其次按同名配对） */
+  GL.migrateLists = function (fresh, old, kind) {
+    if (!Array.isArray(old) || !old.length) return fresh;
+    const map = kind === 'attr' ? ATTR_MIGRATE : SKILL_MIGRATE;
+    for (const item of fresh) {
+      const oldItem = old.find((o) => map[bare(o.name)] === item.id
+        || bare(o.name) === item.name
+        || (o.id === item.id));
+      if (!oldItem) continue;
+      item.value = oldItem.value !== undefined ? oldItem.value : item.value;
+      item.xp = oldItem.xp !== undefined ? oldItem.xp : item.xp;
+      item.xpPerLevel = oldItem.xpPerLevel || item.xpPerLevel;
+      item.history = oldItem.history || item.history;
+      item.logs = oldItem.logs || item.logs;
+      if (kind === 'attr') {
+        item.min = oldItem.min !== undefined ? oldItem.min : item.min;
+        item.max = oldItem.max !== undefined ? oldItem.max : item.max;
+        item.levels = oldItem.levels || item.levels;
+      }
+    }
+    return fresh;
+  };
+
+  /* 右翼「生理状态」只留**客观记录**（具体数值），主观打分归属性面板。
+     二者互补不冲突：睡眠时长是「睡了 6.5 小时」，属性里的睡眠是「作息规律性」。 */
   function docFields() {
     const mk = (name, unit, type) => ({ id: GL.uid(), name, unit, type, value: null, lastAt: null, history: [] });
     return [
       mk('睡眠时长', '小时', 'number'),
       mk('肌肉量', 'kg', 'number'),
-      mk('喉咙(咽部)', '', 'toggle'),
-      mk('鼻炎', '', 'toggle')
     ];
   }
 
-  /* 一键应用技能篇预设：只覆盖技能 / 属性 / 生理字段，保留形象与饮水记录 */
+  /* 一键应用技能篇 / 属性篇预设 */
   GL.applyDocPreset = function () {
     GL.state.skills = docSkills();
     GL.state.attributes = docAttributes();
@@ -72,7 +201,8 @@
   function defaults() {
     const t1 = GL.uid(), b1 = GL.uid(), s1 = GL.uid(), g1 = GL.uid();
     return {
-      version: 1,
+      version: 2,
+      ui: { attrCollapsed: [] },
       avatar: {
         height: 175, weight: 68, muscle: 50,
         skin: '#e8b088', hairStyle: 'short', hairColor: '#2b2118',
@@ -104,10 +234,45 @@
     return out;
   }
 
+  /* ============================================================
+     v1 → v2 迁移：属性 / 技能从「扁平列表」改为「分组体系」
+     ------------------------------------------------------------
+     v1（≤ v1.4.2）：
+       属性 = 精力管理四维 + 外貌四项（8 项，无分组）
+       技能 = 写作 / 口头表达 / small talk / 力量 / 敏捷 / 阅历 / 眼界 / 审美（8 项）
+     v2（本次）：
+       属性 = 生理值(6) + 精神力(5) + 熵值(3)
+       技能 = 生理(2) + 语言(2) + 社交(2) + 外貌(4) + 其他(3)
+
+     迁移规则：
+       ① 同名且同语义的项（写作能力、阅历、眼界…）→ 搬 value / xp / history / logs
+       ② 外貌四项原属属性，新体系归技能 → 在技能侧重建（属性分数不折算成 XP，
+          因为「打分」与「经验值」不是同一把尺子）
+       ③ 淘汰项（体能精力等四维、力量、敏捷）→ 不迁入
+     ============================================================ */
+  function migrateV1toV2(old) {
+    const lookKeys = ['skin', 'outfit', 'hair', 'teeth'];
+    /* 把旧属性里属于外貌的项并入技能匹配源（只带去名字，不带分数） */
+    const lookSrc = (old.attributes || [])
+      .filter((a) => lookKeys.indexOf(SKILL_MIGRATE[bare(a.name)]) !== -1)
+      .map((a) => ({ name: a.name }));
+
+    GL.state.attributes = GL.migrateLists(docAttributes(), old.attributes, 'attr');
+    GL.state.skills = GL.migrateLists(docSkills(), (old.skills || []).concat(lookSrc), 'skill');
+    GL.state.version = 2;
+  }
+
   GL.load = function () {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(KEY)); } catch (e) { /* ignore */ }
-    GL.state = data ? merge(defaults(), data) : defaults();
+    if (!data) {
+      GL.state = defaults();
+    } else {
+      const prevVer = Number(data.version) || 1;
+      GL.state = merge(defaults(), data);
+      if (prevVer < 2) migrateV1toV2(data);
+      if (!GL.state.ui || !Array.isArray(GL.state.ui.attrCollapsed)) GL.state.ui = { attrCollapsed: [] };
+    }
     GL.save();
   };
 
@@ -202,6 +367,50 @@
     const levels = (attr.levels || []).slice().sort((a, b) => b.min - a.min);
     for (const lv of levels) if (attr.value >= lv.min) return lv.label;
     return '—';
+  };
+
+  /* ---------- 分组视图：属性 / 技能共用 ---------- */
+  GL.attrByGroup = function () {
+    return ATTR_GROUPS.map((g) => ({
+      ...g,
+      items: GL.state.attributes.filter((a) => (a.group || 'physio') === g.id),
+    }));
+  };
+
+  GL.skillByGroup = function () {
+    return SKILL_GROUPS.map((g) => ({
+      ...g,
+      items: GL.state.skills.filter((s) => (s.group || 'misc') === g.id),
+    }));
+  };
+
+  /* 组均值：显示**原始水平**（条长 = 实际值）。
+     不在这里反转负向项 —— 熵值 30 就该显示成 30% 的短条，
+     配合红色与「越低越好」标签，语义已经清楚。 */
+  const pctOf = (a) => {
+    const lo = a.min, hi = Math.max(a.max, a.min + 1);
+    return Math.max(0, Math.min(100, ((a.value - lo) / (hi - lo)) * 100));
+  };
+
+  GL.groupMean = function (items) {
+    if (!items.length) return 0;
+    return Math.round(items.reduce((s, a) => s + pctOf(a), 0) / items.length);
+  };
+
+  /* 总览分：**负向指标取反**后再平均。
+     否则「熵值低（这是好事）」会把总分拉低，读起来像状态变差了 ——
+     这是负向指标最容易踩的统计陷阱。 */
+  GL.overallScore = function () {
+    const arr = GL.state.attributes;
+    if (!arr.length) return 0;
+    const sum = arr.reduce((s, a) => s + (a.polarity === 'neg' ? 100 - pctOf(a) : pctOf(a)), 0);
+    return Math.round(sum / arr.length);
+  };
+
+  /* 某种极性在组内是否占多数 —— 决定组标题的着色 */
+  GL.groupPolarity = function (items) {
+    const neg = items.filter((a) => a.polarity === 'neg').length;
+    return neg * 2 > items.length ? 'neg' : 'pos';
   };
 
   /* ---------- Toast ---------- */

@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.4.2';
+  const APP_VERSION = '1.5.0';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 工具：今日饮水 ---------- */
@@ -32,9 +32,9 @@
     if (!lvEl || !boxEl) return;
     const hero = GL.heroLevel();
     const life = GL.lifeInfo();
-    const avg = GL.state.attributes.length
-      ? Math.round(GL.state.attributes.reduce((s, a) => s + a.value, 0) / GL.state.attributes.length)
-      : 0;
+    /* 用 GL.overallScore() 而非直接平均：负向指标（熵值、困倦度）会被反转，
+       否则「熵值低」这个好状态反而拉低总分。 */
+    const avg = GL.overallScore();
     lvEl.textContent = hero.level;
     boxEl.innerHTML = `
       <div class="readout"><b>${recordDays()}<i>天</i></b><span>记录天数</span></div>

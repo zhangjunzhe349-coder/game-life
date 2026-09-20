@@ -105,6 +105,9 @@
     });
   }
 
-  GL.hooks.push(render);
-  GL.renderLife = function () { render(); bind(); };
+  /* hooks 里必须带 bind()，否则 GL.changed() 只重绘不绑事件（页面能看、点不动）。
+     bind() 内有 dataset.bound 幂等保护，重复调用安全。 */
+  const renderAll = function () { render(); bind(); };
+  GL.hooks.push(renderAll);
+  GL.renderLife = renderAll;
 })();

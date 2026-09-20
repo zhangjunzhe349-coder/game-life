@@ -49,14 +49,23 @@
 
   function manage() {
     return `<details class="hist" style="margin-top:4px">
-      <summary>管理技能 · 升级曲线 / 删除</summary>
-      <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
-        ${list().map((s) => `<div class="form-row" data-sid="${s.id}">
-          <span class="dim" style="flex:1 1 140px">${s.emoji || '🎯'} ${GL.esc(s.name)}</span>
-          <label class="dim" style="display:flex;align-items:center;gap:6px;letter-spacing:.06em">每级
-            <input type="number" data-xp-per value="${s.xpPerLevel}" min="1" style="width:74px"> XP</label>
-          <button class="btn mini danger" data-skill-del="${s.id}">删除</button>
-        </div>`).join('')}
+      <summary>管理技能 · 所属分组 / 升级曲线 / 删除</summary>
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:14px">
+        ${GL.skillByGroup().map((g) => {
+          if (!g.items.length) return '';
+          return `<div>
+            <div class="subhead">${g.emoji} ${GL.esc(g.name)}</div>
+            ${g.items.map((s) => `<div class="form-row" data-sid="${s.id}">
+              <span class="dim" style="flex:1 1 120px">${s.emoji || '🎯'} ${GL.esc(s.name)}</span>
+              <select data-skill-group="${s.id}" style="flex:0 1 96px" aria-label="所属分组">
+                ${GL.SKILL_GROUPS.map((x) => `<option value="${x.id}"${(s.group || 'misc') === x.id ? ' selected' : ''}>${GL.esc(x.name)}</option>`).join('')}
+              </select>
+              <label class="dim" style="display:flex;align-items:center;gap:6px;letter-spacing:.06em">每级
+                <input type="number" data-xp-per value="${s.xpPerLevel}" min="1" style="width:74px"> XP</label>
+              <button class="btn mini danger" data-skill-del="${s.id}">删除</button>
+            </div>`).join('')}
+          </div>`;
+        }).join('')}
       </div>
     </details>`;
   }
@@ -65,19 +74,33 @@
     const el = document.getElementById('panel-skills');
     if (!el) return;
     const total = list().reduce((s, k) => s + (k.xp || 0), 0);
+    const groups = GL.skillByGroup();
+
     el.innerHTML = `
       <div class="card">
         <div class="card-head">
           <span class="card-title">🎯 技能经验值</span>
           <span class="card-hint">${list().length} 项 · 累计 ${total} XP</span>
         </div>
-        <div class="skill-grid">
-          ${list().map(card).join('') || '<span class="dim">还没有技能，先在下方创建</span>'}
-        </div>
+        ${groups.map((g) => {
+          if (!g.items.length) return '';
+          const gxp = g.items.reduce((s, k) => s + (k.xp || 0), 0);
+          return `<section class="sg" data-gid="${g.id}">
+            <div class="sg-head">
+              <span class="sg-glyph" aria-hidden="true">${g.emoji}</span>
+              <span class="sg-name">${GL.esc(g.name)}</span>
+              <span class="sg-meta">${g.items.length} 项 · ${gxp} XP</span>
+            </div>
+            <div class="skill-grid">${g.items.map(card).join('')}</div>
+          </section>`;
+        }).join('') || '<span class="dim">还没有技能，请点下方按钮创建</span>'}
         <div class="edit-box">
           <div class="form-row">
             <input type="text" id="s-emoji" placeholder="emoji" style="flex:0 1 72px" maxlength="4" aria-label="图标">
             <input type="text" id="s-name" placeholder="技能名，如 写作能力" style="flex:2 1 160px" aria-label="技能名">
+            <select id="s-group" style="flex:0 1 100px" aria-label="所属分组">
+              ${GL.SKILL_GROUPS.map((x) => `<option value="${x.id}">${GL.esc(x.name)}</option>`).join('')}
+            </select>
             <input type="number" id="s-xp" value="100" min="1" title="每级基础XP" style="flex:0 1 92px" aria-label="每级基础经验">
             <button class="btn mini primary" id="s-add">＋ 创建技能</button>
           </div>
@@ -130,8 +153,9 @@
         const name = (el.querySelector('#s-name').value || '').trim();
         const emoji = el.querySelector('#s-emoji').value.trim() || '🎯';
         const per = Math.max(1, Number(el.querySelector('#s-xp').value) || 100);
+        const group = el.querySelector('#s-group').value || 'misc';
         if (!name) { GL.toast('先填写技能名', 'err'); return; }
-        list().push({ id: GL.uid(), name, emoji, xp: 0, xpPerLevel: per, actions: [], logs: [] });
+        list().push({ id: GL.uid(), name, emoji, group, xp: 0, xpPerLevel: per, actions: [], logs: [] });
         GL.toast('技能「' + name + '」已创建', 'ok');
         GL.changed();
         return;
@@ -147,6 +171,12 @@
     });
 
     el.addEventListener('change', (e) => {
+      /* 切换所属分组 */
+      if (e.target.dataset.skillGroup !== undefined) {
+        const s = find(e.target.dataset.skillGroup);
+        if (s) { s.group = e.target.value; GL.toast('已移至「' + (GL.SKILL_GROUPS.find((g) => g.id === s.group) || {}).name + '」', 'ok'); GL.changed(); }
+        return;
+      }
       if (e.target.dataset.xpPer === undefined) return;
       const row = e.target.closest('[data-sid]');
       const s = row ? find(row.dataset.sid) : null;
@@ -163,6 +193,9 @@
     });
   }
 
-  GL.hooks.push(render);
-  GL.renderSkills = function () { render(); bind(); };
+  /* hooks 里必须带 bind()：GL.changed() 是唯一重渲染入口，只注册 render 会导致
+     事件委托从未绑定 —— 表现为「页面能看、点不动」。bind() 有幂等保护。 */
+  const renderAll = function () { render(); bind(); };
+  GL.hooks.push(renderAll);
+  GL.renderSkills = renderAll;
 })();
