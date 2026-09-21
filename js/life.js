@@ -7,49 +7,94 @@
   const INK_NOW = '#3ce8b0';                 // 当前周：信号青描边
   const INK_LABEL = '#646d84';
 
-  function drawGrid(canvas, birthDate, expectancy) {
-    if (!canvas) return;
+  /* ============================================================
+     一周一格的一生 · 列宽随容器自适应
+     ------------------------------------------------------------
+     旧实现有两个坑，导致网格只画出左边一小块、右侧一大片空白：
+     ① 量的是 canvas.clientWidth —— canvas 没有 CSS 宽度时默认就是 300px，
+        量自己等于拿「上一次的自己」当基准，永远填不满。
+        正确做法是量**外层容器** #life-grid-wrap。
+     ② 用 window.resize + { once: true } 只重画一次，而且每次 render 都会
+        再叠加一个监听。改用 ResizeObserver 持续跟随容器宽度，
+        并用 lastW 去重防止「改高度 → 触发观察 → 再改高度」的自激循环。
+     ============================================================ */
+  let ro = null;      // 唯一的 ResizeObserver，render 时重建
+  let lastW = -1;     // 上次绘制的可用宽度，用于去重
+
+  function drawGrid() {
+    const canvas = document.getElementById('life-grid');
+    const wrap = document.getElementById('life-grid-wrap');
+    if (!canvas || !wrap) return;
+
+    const L = GL.state.life;
+    const cols = 52;                              // 一年 52 周
+    const rows = Math.max(1, Number(L.expectancy) || 80);
     const dpr = window.devicePixelRatio || 1;
-    const cols = 52, rows = expectancy;
-    const W = canvas.clientWidth || 560;
-    const left = 34, top = 4, gap = 1;
-    const cell = Math.max(5, Math.floor((W - left - (cols - 1) * gap) / cols));
-    const H = top + rows * (cell + gap) + 6;
-    canvas.width = W * dpr; canvas.height = H * dpr;
+
+    const avail = Math.floor(wrap.clientWidth);
+    if (avail < 120) return;                      // 面板尚未完成布局，等下一帧
+    if (avail === lastW) return;                  // 宽度没变 → 不重画（防自激）
+    lastW = avail;
+
+    const padL = 34, padR = 2, gap = 1, top = 4;
+    /* 列宽取整后再把除不尽的余数摊到前 N 列：
+       整行恰好铺满，且每列边缘都落在整数像素上（不会糊成半透明边） */
+    const rawCell = (avail - padL - padR - (cols - 1) * gap) / cols;
+    const base = Math.max(2, Math.floor(rawCell));
+    const extra = Math.max(0, Math.min(cols, Math.round((rawCell - base) * cols)));
+
+    const colW = (c) => base + (c < extra ? 1 : 0);
+    const totalW = padL + cols * base + extra + (cols - 1) * gap + padR;
+    const H = top + rows * (base + gap) + 6;
+
+    canvas.width = Math.round(totalW * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = totalW + 'px';
     canvas.style.height = H + 'px';
+
     const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
+    // setTransform 而非 scale：同一个 canvas 被重画多次时 scale 会累乘
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, totalW, H);
 
     const birthMs = GL.lifeInfo().birth.getTime();
     const lived = Math.max(0, Math.floor((Date.now() - birthMs) / (7 * 86400e3)));
 
+    // 预计算每列左边缘
+    const xs = new Array(cols);
+    let x = padL;
+    for (let c = 0; c < cols; c++) { xs[c] = x; x += colW(c) + gap; }
+
     for (let r = 0; r < rows; r++) {
-      if (r % 10 === 0) {                     // 每 10 年标注年龄
+      const y = top + r * (base + gap);
+      if (r % 10 === 0) {                       // 每 10 年标注年龄
         ctx.fillStyle = INK_LABEL;
         ctx.font = '10px "JetBrains Mono", monospace';
         ctx.textBaseline = 'top';
-        ctx.fillText(r + '岁', 2, top + r * (cell + gap) + cell / 3);
+        ctx.fillText(r + '岁', 2, y + base / 3);
       }
       for (let c = 0; c < cols; c++) {
         const idx = r * cols + c;
-        const x = left + c * (cell + gap);
-        const y = top + r * (cell + gap);
+        const w = colW(c);
         if (idx < lived) {
-          const g = ctx.createLinearGradient(x, y, x + cell, y + cell);
+          const g = ctx.createLinearGradient(xs[c], y, xs[c] + w, y + base);
           g.addColorStop(0, INK_PAST[0]); g.addColorStop(1, INK_PAST[1]);
           ctx.fillStyle = g;
         } else {
           ctx.fillStyle = INK_FUTURE;
         }
-        ctx.fillRect(x, y, cell, cell);
-        if (idx === lived) {                  // 当前周高亮
+        ctx.fillRect(xs[c], y, w, base);
+        if (idx === lived) {                    // 当前周高亮
           ctx.strokeStyle = INK_NOW;
           ctx.lineWidth = 1.5;
-          ctx.strokeRect(x - 1, y - 1, cell + 2, cell + 2);
+          ctx.strokeRect(xs[c] - 1, y - 1, w + 2, base + 2);
         }
       }
     }
   }
+
+  /* 兜底：极老的环境没有 ResizeObserver 时，退回窗口 resize */
+  window.addEventListener('resize', () => { drawGrid(); });
 
   function render() {
     const el = document.getElementById('panel-life');
@@ -87,8 +132,16 @@
       </div>
     </div>`;
 
-    requestAnimationFrame(() => drawGrid(document.getElementById('life-grid'), L.birthDate, L.expectancy));
-    window.addEventListener('resize', () => drawGrid(document.getElementById('life-grid'), L.birthDate, L.expectancy), { once: true });
+    /* 面板重建后 canvas / wrap 都是新节点，必须重画 —— 先清掉宽度去重标记 */
+    lastW = -1;
+    requestAnimationFrame(drawGrid);
+
+    const wrap = document.getElementById('life-grid-wrap');
+    if (ro) { ro.disconnect(); ro = null; }
+    if (wrap && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => drawGrid());
+      ro.observe(wrap);
+    }
   }
 
   function bind() {

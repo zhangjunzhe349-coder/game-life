@@ -34,7 +34,8 @@
   const ATTR_GROUPS = [
     { id: 'physio', name: '生理值', emoji: '❤️', note: '身体基线' },
     { id: 'mental', name: '精神力', emoji: '🧠', note: '心理状态' },
-    { id: 'entropy', name: '熵值', emoji: '🌀', note: '越低越好' },
+    /* 组注按原文照录（原文：==熵值==（此项过高暂没法做高集中的事）） */
+    { id: 'entropy', name: '熵值', emoji: '🌀', note: '（此项过高暂没法做高集中的事）' },
   ];
 
   const SKILL_GROUPS = [
@@ -48,45 +49,55 @@
   GL.ATTR_GROUPS = ATTR_GROUPS;
   GL.SKILL_GROUPS = SKILL_GROUPS;
 
-  /* 属性项定义：[key, 显示名, 副标题, 组, 极性] */
+  /* ============================================================
+     属性项定义：[key, 显示名, 小字注解, 组, 极性, 说明]
+     ------------------------------------------------------------
+     ⚠ 小字注解（sub）与说明（note）**逐字照录**用户的
+       D:\张俊哲\desk\【游戏人生(属性篇)】.txt —— 全角括号、破折号、
+       标点一律保留，不得改写、精简或合并。
+     原文结构 → 字段的对应关系：
+       「运动度（活动半径）（久坐值）」        → name「运动度」 sub「（活动半径）（久坐值）」
+       「运动度」下面 `` ——待家里会头晕 ``    → note「——待家里会头晕」
+     ============================================================ */
   const ATTR_DEFS = [
-    ['throat', '喉咙', '咽部', 'physio', 'pos'],
-    ['nose', '鼻腔', '鼻炎积水', 'physio', 'pos'],
-    ['drowse', '困倦度', '', 'physio', 'neg'],
-    ['move', '运动度', '活动半径', 'physio', 'pos'],
-    ['sleep', '睡眠', '早睡早起值', 'physio', 'pos'],
-    ['diet', '饮食', '少油少盐', 'physio', 'pos'],
+    ['throat', '喉咙', '（咽部）', 'physio', 'pos', ''],
+    ['nose', '鼻腔', '（鼻炎积水）', 'physio', 'pos', ''],
+    ['drowse', '困倦度', '', 'physio', 'neg', ''],
+    ['move', '运动度', '（活动半径）（久坐值）', 'physio', 'pos', '——待家里会头晕'],
+    ['sleep', '睡眠', '（早睡早起值）', 'physio', 'pos', '——起的越晚，越累'],
+    ['diet', '饮食', '', 'physio', 'pos', '——（少油，少盐，少糖）（地中海饮食，高蛋白）'],
 
-    ['desire', '欲望值', '动力感', 'mental', 'pos'],
-    ['mood', '情绪值', '', 'mental', 'pos'],
-    ['social', '社交度', '环境能量', 'mental', 'mid'],
-    ['stable', '稳定度', '过高会麻木', 'mental', 'mid'],
-    ['hope', '盼头值', '有奔头', 'mental', 'pos'],
+    ['desire', '欲望值', '（动力感）', 'mental', 'pos', ''],
+    ['mood', '情绪值', '', 'mental', 'pos', ''],
+    ['social', '社交度', '', 'mental', 'mid', '——(环境能量)(内外倾高低能都需要)——(过低生理级不适)——还决定了你的眼界，高质量圈子带来的信息交换会逼着人成长'],
+    ['stable', '稳定度', '', 'mental', 'mid', '——(过低→生活变动大)(会打断很多系统习惯)（过高日复一日又会陷入麻木）'],
+    ['hope', '盼头值', '', 'mental', 'pos', '——生活有没有一个盼头'],
 
-    ['dopamine', '多巴胺需求', '阈值', 'entropy', 'neg'],
-    ['chaos', '混乱值', '信息与选择', 'entropy', 'neg'],
-    ['noise', '嘈杂值', '环境噪音', 'entropy', 'neg'],
+    ['dopamine', '多巴胺需求', '', 'entropy', 'neg', '—→(阈值)←(过高破坏系统性动作)'],
+    ['chaos', '混乱值', '', 'entropy', 'neg', '——★熵★(信息接收数量和频次)，做选择次数，刷视频'],
+    ['noise', '嘈杂值', '', 'entropy', 'neg', '——周围的声音，反独处心境，待家里就高\n——嘈杂值过高，失去自我。'],
   ];
 
-  /* 技能项定义：[key, 显示名, emoji, 组, 行动库] */
+  /* 技能项定义：[key, 显示名, 小字注解, emoji, 组, 行动库, 说明]
+     小字同样逐字照录 D:\张俊哲\desk\【游戏人生(技能篇)】元技能与方法论(1).txt */
   const SKILL_DEFS = [
-    ['muscle', '肌肉量', '💪', 'physio', [['力量训练', 30], ['自重训练组', 15]]],
-    ['cardio', '心肺', '🫁', 'physio', [['有氧训练', 25], ['间歇冲刺', 30]]],
+    ['muscle', '肌肉量', '（细狗——匀称——薄肌）', '💪', 'physio', [['力量训练', 30], ['自重训练组', 15]], ''],
+    ['cardio', '心肺', '', '🫁', 'physio', [['有氧训练', 25], ['间歇冲刺', 30]], ''],
 
-    ['writing', '写作能力', '✍️', 'lang', [['写作30分钟', 15], ['输出一篇文章', 40]]],
-    ['speaking', '表达能力', '🎤', 'lang', [['刻意练习15分钟', 10], ['完整表达一次', 30]]],
+    ['writing', '写作能力', '', '✍️', 'lang', [['写作30分钟', 15], ['输出一篇文章', 40]], ''],
+    ['speaking', '表达能力', '（口头）', '🎤', 'lang', [['刻意练习15分钟', 10], ['完整表达一次', 30]], ''],
 
-    ['smalltalk', 'small talk', '💬', 'social', [['主动破冰', 10], ['完成一段闲聊', 15]]],
-    ['confidence', '自信值', '🦁', 'social', [['当众表达', 25], ['做一件不敢做的事', 35]]],
+    ['smalltalk', 'small talk闲聊能力', '（破冰）', '💬', 'social', [['主动破冰', 10], ['完成一段闲聊', 15]], ''],
+    ['confidence', '自信值', '', '🦁', 'social', [['当众表达', 25], ['做一件不敢做的事', 35]], ''],
 
-    ['skin', '皮肤', '🧴', 'look', [['护肤流程', 10], ['规律作息一天', 15]]],
-    ['outfit', '穿搭', '👔', 'look', [['搭一套造型', 15], ['分析他人穿搭', 8]]],
-    ['hair', '发型', '💇', 'look', [['打理发型', 8], ['尝试新造型', 20]]],
-    ['teeth', '牙齿', '🦷', 'look', [['认真刷牙+牙线', 8], ['定期洗牙', 25]]],
+    ['skin', '皮肤', '', '🧴', 'look', [['护肤流程', 10], ['规律作息一天', 15]], ''],
+    ['outfit', '穿搭', '', '👔', 'look', [['搭一套造型', 15], ['分析他人穿搭', 8]], ''],
+    ['hair', '发型', '', '💇', 'look', [['打理发型', 8], ['尝试新造型', 20]], ''],
+    ['teeth', '牙齿', '', '🦷', 'look', [['认真刷牙+牙线', 8], ['定期洗牙', 25]], ''],
 
-    ['experience', '阅历', '🧭', 'misc', [['记录一次新经历', 15], ['与不同背景的人深聊', 20]]],
-    ['vision', '眼界', '🔭', 'misc', [['精读深度内容', 10], ['学一个新领域框架', 25]]],
-    ['aesthetic', '审美力', '🎨', 'misc', [['分析一个优秀作品', 15], ['收集灵感', 10]]],
+    ['experience', '阅历', '', '🧭', 'misc', [['记录一次新经历', 15], ['与不同背景的人深聊', 20]], ''],
+    ['vision', '眼界', '', '🔭', 'misc', [['精读深度内容', 10], ['学一个新领域框架', 25]], ''],
+    ['aesthetic', '审美力', '', '🎨', 'misc', [['分析一个优秀作品', 15], ['收集灵感', 10]], ''],
   ];
 
   /* 等级文案必须跟着极性走 —— 对「困倦度」显示「🔥 充沛」是反的。
@@ -117,8 +128,8 @@
   const START_VALUE = { pos: 60, neg: 30, mid: 55 };
 
   function docAttributes() {
-    return ATTR_DEFS.map(([key, name, sub, group, polarity]) => ({
-      id: key, name, sub, group, polarity,
+    return ATTR_DEFS.map(([key, name, sub, group, polarity, note]) => ({
+      id: key, name, sub: sub || '', note: note || '', group, polarity,
       min: 0, max: 100,
       value: START_VALUE[polarity] !== undefined ? START_VALUE[polarity] : 60,
       levels: (LEVELS[polarity] || LEVELS.pos)(), history: []
@@ -132,8 +143,9 @@
   GL.POL_NAME = { pos: '越高越好', neg: '越低越好', mid: '中间最好' };
 
   function docSkills() {
-    return SKILL_DEFS.map(([key, name, emoji, group, actions]) => ({
-      id: key, name, emoji, group, xp: 0, xpPerLevel: 100,
+    return SKILL_DEFS.map(([key, name, sub, emoji, group, actions, note]) => ({
+      id: key, name, sub: sub || '', note: note || '',
+      emoji, group, xp: 0, xpPerLevel: 100,
       actions: actions.map(([n, xp]) => ({ id: GL.uid(), name: n, xp })),
       logs: []
     }));
@@ -201,7 +213,7 @@
   function defaults() {
     const t1 = GL.uid(), b1 = GL.uid(), s1 = GL.uid(), g1 = GL.uid();
     return {
-      version: 2,
+      version: 3,
       ui: { attrCollapsed: [] },
       avatar: {
         height: 175, weight: 68, muscle: 50,
@@ -262,6 +274,41 @@
     GL.state.version = 2;
   }
 
+  /* ============================================================
+     v2 → v3 迁移：把「小字」还原成用户原文
+     ------------------------------------------------------------
+     v2（v1.5.0）里，我把用户的原文压缩成了短标签（如把「（活动半径）（久坐值）」
+     写成「活动半径」），并且把 `` —— `` 引导的那一整行说明**整个丢掉了**。
+     用户明确要求「原文里是什么就是什么，不要删减」。
+
+     迁移策略：按固定 key 命中内置项后，用定义表里的原文覆盖 name/sub/note。
+     安全性：v1.5.0 没有任何改名/改注解的入口，所以现存数据里这两个字段
+     必然还是我写的旧值，覆盖不会伤到用户的编辑；用户自己新建的项
+     （id 不在定义表里）一律不动。
+     ============================================================ */
+  function migrateV2toV3() {
+    const aMap = {};
+    ATTR_DEFS.forEach(([id, name, sub, , , note]) => { aMap[id] = { name, sub, note }; });
+    const sMap = {};
+    SKILL_DEFS.forEach(([id, name, sub, , , , note]) => { sMap[id] = { name, sub, note }; });
+
+    GL.state.attributes.forEach((a) => {
+      const d = aMap[a.id];
+      if (!d) return;
+      a.name = d.name;
+      a.sub = d.sub || '';
+      a.note = d.note || '';
+    });
+    GL.state.skills.forEach((s) => {
+      const d = sMap[s.id];
+      if (!d) return;
+      s.name = d.name;
+      s.sub = d.sub || '';
+      s.note = d.note || '';
+    });
+    GL.state.version = 3;
+  }
+
   GL.load = function () {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(KEY)); } catch (e) { /* ignore */ }
@@ -271,6 +318,7 @@
       const prevVer = Number(data.version) || 1;
       GL.state = merge(defaults(), data);
       if (prevVer < 2) migrateV1toV2(data);
+      if (prevVer < 3) migrateV2toV3();
       if (!GL.state.ui || !Array.isArray(GL.state.ui.attrCollapsed)) GL.state.ui = { attrCollapsed: [] };
     }
     GL.save();
@@ -300,6 +348,28 @@
   GL.esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  /* ---------- 文字编辑区（属性 / 技能共用） ----------
+     产出的三个字段用 data-<kind>-name / -sub / -note 标记，
+     各模块在 bind() 里按自己的前缀处理。
+     注意：文字改动不要走 GL.changed() —— 整页重渲染会
+     把正在编辑的输入框连同光标一起换掉，编辑体验会碎掉。 */
+  GL.textEditBox = function (x, kind) {
+    return `<div class="tx-edit">
+      <label class="tx-field">
+        <span class="tx-key">名称</span>
+        <input type="text" data-${kind}-name value="${GL.esc(x.name)}" aria-label="名称">
+      </label>
+      <label class="tx-field">
+        <span class="tx-key">小字</span>
+        <input type="text" data-${kind}-sub value="${GL.esc(x.sub || '')}" placeholder="括号里的注解" aria-label="小字注解">
+      </label>
+      <label class="tx-field wide">
+        <span class="tx-key">说明</span>
+        <textarea data-${kind}-note rows="2" placeholder="破折号后面的说明" aria-label="说明">${GL.esc(x.note || '')}</textarea>
+      </label>
+    </div>`;
+  };
 
   const pad = (n) => String(n).padStart(2, '0');
 

@@ -1,5 +1,5 @@
 /* ============================================================
-   数据迁移校验：v1（扁平列表）→ v2（分组体系）
+   数据迁移校验：v1（扁平列表）→ v2（分组体系）→ v3（小字照录原文）
    ------------------------------------------------------------
    为什么单独测：迁移逻辑一旦出错，用户的历史记录会静默丢失 ——
    不会报错、不会崩溃，只是数据没了。必须用真实样例断言。
@@ -62,7 +62,7 @@ const v1State = {
 
   check(A.attributes.length === 14, '全新：属性 14 项', '实际 ' + A.attributes.length);
   check(A.skills.length === 13, '全新：技能 13 项', '实际 ' + A.skills.length);
-  check(A.version === 2, '全新：version = 2', '实际 ' + A.version);
+  check(A.version === 3, '全新：version = 3', '实际 ' + A.version);
 
   const groups = [...new Set(A.attributes.map((a) => a.group))];
   check(groups.length === 3 && groups.includes('physio') && groups.includes('mental') && groups.includes('entropy'),
@@ -104,7 +104,7 @@ const v1State = {
 
   check(A.attributes.length === 14, '迁移：属性换为 14 项新体系', '实际 ' + A.attributes.length);
   check(A.skills.length === 13, '迁移：技能换为 13 项新体系', '实际 ' + A.skills.length);
-  check(A.version === 2, '迁移：version 升到 2');
+  check(A.version === 3, '迁移：version 升到 3');
 
   // 同语义的技能经验必须保住
   const writing = A.skills.find((s) => s.id === 'writing');
@@ -138,8 +138,77 @@ const v1State = {
 
   // 二次加载不应重复迁移（幂等）
   GL.load();
-  check(GL.state.attributes.length === 14 && GL.state.version === 2,
+  check(GL.state.attributes.length === 14 && GL.state.version === 3,
     '迁移：重复 load 幂等（不会叠加）', '属性 ' + GL.state.attributes.length + ' 项');
+}
+
+/* ============ 用例 3：v2 → v3 把「小字」还原成用户原文 ============
+   v2（v1.5.0）里我把用户的原文压缩成了短标签，并把 `` —— `` 引导的
+   说明整行丢掉了。用户要求「原文里是什么就是什么」。这里断言还原到位，
+   且**用户自建的项不被误改**。 */
+{
+  const { GL, store } = boot();
+  GL.load();                                     // 先拿一份 v3 全量数据
+  const v2 = JSON.parse(JSON.stringify(GL.state));
+  v2.version = 2;
+  // 模拟 v2 时代的样子：说明字段整个不存在，小字是我压缩过的
+  v2.attributes.forEach((a) => { delete a.note; });
+  v2.skills.forEach((s) => { delete s.sub; delete s.note; });
+  v2.attributes.find((a) => a.id === 'move').sub = '活动半径';
+  v2.attributes.find((a) => a.id === 'diet').sub = '少油少盐';
+  v2.attributes.find((a) => a.id === 'social').sub = '环境能量';
+  v2.skills.find((s) => s.id === 'smalltalk').name = 'small talk';
+  // 用户自己加的一项：迁移必须**原样不动**
+  v2.attributes.push({
+    id: 'my_own', name: '我的自定义', sub: '（我自己写的）', note: '别动我',
+    group: 'physio', polarity: 'pos', min: 0, max: 100, value: 50, levels: [], history: [],
+  });
+
+  store['gamelife_state_v1'] = JSON.stringify(v2);
+  GL.load();
+  const B = GL.state;
+  const attr = (id) => B.attributes.find((a) => a.id === id);
+  const skill = (id) => B.skills.find((s) => s.id === id);
+
+  check(B.version === 3, '还原：version 升到 3', '实际 ' + B.version);
+
+  check(attr('move').sub === '（活动半径）（久坐值）',
+    '还原：运动度小字 = 原文「（活动半径）（久坐值）」', '实际 ' + attr('move').sub);
+  check(attr('move').note === '——待家里会头晕',
+    '还原：运动度说明 = 原文「——待家里会头晕」', '实际 ' + attr('move').note);
+  check(attr('diet').note === '——（少油，少盐，少糖）（地中海饮食，高蛋白）',
+    '还原：饮食说明 = 原文（含标点全角括号）', '实际 ' + attr('diet').note);
+  check(attr('diet').sub === '', '还原：饮食无小字（原文括号内容属于说明）', '实际 ' + attr('diet').sub);
+  check(attr('noise').note.indexOf('\n') !== -1,
+    '还原：嘈杂值说明保留原文换行（两行）', JSON.stringify(attr('noise').note));
+  check(attr('social').note.indexOf('高质量圈子带来的信息交换') !== -1,
+    '还原：社交度说明 = 原文整段未被截断');
+  check(attr('stable').note === '——(过低→生活变动大)(会打断很多系统习惯)（过高日复一日又会陷入麻木）',
+    '还原：稳定度说明 = 原文', '实际 ' + attr('stable').note);
+  check(attr('drowse').sub === '', '还原：困倦度无小字');
+
+  check(skill('muscle').sub === '（细狗——匀称——薄肌）',
+    '还原：肌肉量小字 = 原文', '实际 ' + skill('muscle').sub);
+  check(skill('speaking').sub === '（口头）', '还原：表达能力小字 = 原文', '实际 ' + skill('speaking').sub);
+  check(skill('smalltalk').sub === '（破冰）', '还原：small talk 小字 = 原文', '实际 ' + skill('smalltalk').sub);
+  check(skill('smalltalk').name === 'small talk闲聊能力',
+    '还原：small talk 名称 = 原文「small talk闲聊能力」', '实际 ' + skill('smalltalk').name);
+  check(skill('cardio').sub === '', '还原：心肺无小字（原文就没有）');
+
+  // 用户自建项不能被迁移碰到
+  check(attr('my_own') && attr('my_own').name === '我的自定义' && attr('my_own').sub === '（我自己写的）'
+    && attr('my_own').note === '别动我',
+    '还原：用户自建的项原样保留（迁移只认内置 key）');
+
+  // 历史记录还要在
+  const writing = skill('writing');
+  check(!!writing, '还原：技能项仍完好');
+
+  // 幂等
+  const before = JSON.stringify(B.attributes.map((a) => [a.id, a.sub, a.note]));
+  GL.load();
+  const after = JSON.stringify(GL.state.attributes.map((a) => [a.id, a.sub, a.note]));
+  check(before === after, '还原：重复 load 幂等（小字不会被二次改写）');
 }
 
 /* ============ 输出 ============ */

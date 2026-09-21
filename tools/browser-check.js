@@ -188,6 +188,14 @@ function check(ok, label, detail) {
       }),
       skillGroups: document.querySelectorAll('.sg').length,
       skillCards: document.querySelectorAll('.skill').length,
+      skillNoteBtns: document.querySelectorAll('.skill-note-btn').length,
+      skillSubCount: document.querySelectorAll('.skill-sub').length,
+      skillNoteTxtCount: document.querySelectorAll('.skill-note-txt').length,
+      /* v1.6.0：小字必须与用户原文逐字一致，抽查几项最容易被压缩的 */
+      subMove: (gl.state && (gl.state.attributes.find((a) => a.id === 'move') || {}).sub) || null,
+      noteDiet: (gl.state && (gl.state.attributes.find((a) => a.id === 'diet') || {}).note) || null,
+      nameSmalltalk: (gl.state && (gl.state.skills.find((s) => s.id === 'smalltalk') || {}).name) || null,
+      subMuscle: (gl.state && (gl.state.skills.find((s) => s.id === 'muscle') || {}).sub) || null,
       overall: typeof gl.overallScore === 'function' ? gl.overallScore() : null,
       attrCount: (gl.state && gl.state.attributes || []).length,
       skillCount: (gl.state && gl.state.skills || []).length,
@@ -219,16 +227,28 @@ function check(ok, label, detail) {
   /* ---------- 属性分组体系（v1.5.0） ---------- */
   check(S.attrCount === 14, '属性共 14 项（3 大类）', `实际 ${S.attrCount}`);
   check(S.skillCount === 13, '技能共 13 项（5 大类）', `实际 ${S.skillCount}`);
-  check(S.dataVersion === 2, '数据版本为 v2（迁移已完成）', `实际 v${S.dataVersion}`);
+  check(S.dataVersion === 3, '数据版本为 v3（迁移已完成）', `实际 v${S.dataVersion}`);
   check(S.attrGroups === 3, '属性面板渲染 3 个分组', `实际 ${S.attrGroups} —— 为 0 说明属性面板没渲染`);
   check(S.attrRows === 14, '属性面板渲染 14 行细刻度', `实际 ${S.attrRows}`);
   check(S.attrNegGroups === 1, '熵值组带负向标记（.ag.neg）', `实际 ${S.attrNegGroups}`);
   check(S.attrNegRows === 4, '负向行 4 个（熵值3 + 困倦度）', `实际 ${S.attrNegRows}`);
   check(S.attrMidRows === 2, '双向行 2 个（社交度、稳定度）', `实际 ${S.attrMidRows}`);
-  check(S.attrHasSub >= 8, '副标题已渲染（.ag-sub）', `实际 ${S.attrHasSub}`);
   check(S.overall !== null && S.overall > 0, 'GL.overallScore() 可用', `实际 ${S.overall}`);
   check(S.skillGroups === 5, '技能页渲染 5 个分组', `实际 ${S.skillGroups} —— 注意技能在独立 tab，需确认已渲染`);
   check(S.skillCards === 13, '技能卡片 13 张', `实际 ${S.skillCards}`);
+
+  /* ---------- 小字照录原文 + 可编辑入口（v1.6.0） ---------- */
+  check(S.attrHasSub === 5, '属性小字渲染 5 处（原文里带括号的 5 项）', `实际 ${S.attrHasSub}`);
+  check(S.subMove === '（活动半径）（久坐值）',
+    '小字按原文照录：运动度 =「（活动半径）（久坐值）」', `实际 ${S.subMove}`);
+  check(S.noteDiet === '——（少油，少盐，少糖）（地中海饮食，高蛋白）',
+    '说明按原文照录：饮食（含全角括号标点）', `实际 ${S.noteDiet}`);
+  check(S.nameSmalltalk === 'small talk闲聊能力',
+    '技能名按原文照录：small talk闲聊能力', `实际 ${S.nameSmalltalk}`);
+  check(S.subMuscle === '（细狗——匀称——薄肌）',
+    '技能小字按原文照录：肌肉量', `实际 ${S.subMuscle}`);
+  check(S.skillSubCount === 3, '技能小字渲染 3 处（肌肉量 / 表达能力 / small talk）', `实际 ${S.skillSubCount}`);
+  check(S.skillNoteBtns === 13, '每张技能卡片都有注释入口', `实际 ${S.skillNoteBtns}`);
 
   /* ---------- 出图 ---------- */
   let shotPaths = [];
@@ -266,7 +286,48 @@ function check(ok, label, detail) {
     await ev(`(() => { const b = document.querySelector('.tab[data-tab="hud"]'); if (b) b.click(); })()`);
   }
 
-  /* ---------- 交互测试：折叠 + 微调（v1.5.0 新组件，必须真点一遍） ---------- */
+  /* ---------- 生命刻度：列宽必须跟着容器宽度自适应（v1.6.0） ----------
+     旧实现的坑：量的是 canvas.clientWidth（canvas 无 CSS 宽度时默认 300px），
+     于是网格永远只画出左边一小块。这里直接对比 canvas 与容器的实际宽度。 */
+  const grid = await ev(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const b = document.querySelector('.tab[data-tab="life"]');
+    if (b) b.click();
+    await sleep(700);
+    const c = document.getElementById('life-grid');
+    const w = document.getElementById('life-grid-wrap');
+    if (!c || !w) return { err: 'canvas or wrap missing' };
+    const cs = getComputedStyle(c);
+    const out = {
+      canvasW: Math.round(c.getBoundingClientRect().width),
+      canvasH: Math.round(c.getBoundingClientRect().height),
+      wrapW: Math.round(w.clientWidth),
+      bitmapW: c.width,
+      dpr: window.devicePixelRatio || 1,
+      inlineW: c.style.width,
+      display: cs.display,
+      scrollX: w.scrollWidth > w.clientWidth + 1,
+    };
+    // 切回总览：后面的交互测试要操作属性面板，它必须可见（隐藏元素高度为 0）
+    const back = document.querySelector('.tab[data-tab="hud"]');
+    if (back) back.click();
+    await sleep(400);
+    return out;
+  })()`);
+
+  if (grid && !grid.__err) {
+    check(typeof grid.canvasW === 'number' && grid.canvasW > 320,
+      '生命刻度：网格宽度不再是默认的 300px 底', `${grid.canvasW}px`);
+    check(grid.canvasW >= grid.wrapW - 6 && grid.canvasW <= grid.wrapW + 2,
+      '生命刻度：列宽铺满容器宽度（自适应）',
+      `canvas ${grid.canvasW}px / 容器 ${grid.wrapW}px`);
+    check(grid.scrollX === false, '生命刻度：不产生横向滚动条（没有溢出）');
+    check(grid.canvasH > 300, '生命刻度：网格有完整高度（80 行）', `${grid.canvasH}px`);
+  } else {
+    check(false, '生命刻度：测量失败', grid && grid.err ? String(grid.err) : '未知');
+  }
+
+  /* ---------- 交互测试：折叠 + 微调 + 就地编辑（v1.5.0 / v1.6.0 新组件，必须真点一遍） ---------- */
   const inter = await ev(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const itemsH = () => {
@@ -337,6 +398,61 @@ function check(ok, label, detail) {
     // 收起微调条，避免影响后续
     if (pick('.ag-row[data-aid="mood"]')) { pick('.ag-row[data-aid="mood"]').click(); await sleep(300); }
 
+    // ⑤ 文字就地编辑：写进 state + 行内小字同步，且**不整页重渲染**
+    //    （重渲染会把正在编辑的输入框换掉，光标丢 —— 所以要断言旧引用仍然连着）
+    if (pick('.ag-row[data-aid="throat"]')) {
+      pick('.ag-row[data-aid="throat"]').click(); await sleep(350);
+      const box = pick('.ag-tune[data-aid="throat"]');
+      out.txBoxFound = !!box;
+      out.txFields = box ? box.querySelectorAll('.tx-edit input, .tx-edit textarea').length : 0;
+      const inp = box ? box.querySelector('[data-attr-sub]') : null;
+      out.origSub = inp ? inp.value : null;
+      if (inp) {
+        inp.value = '（测试小字）';
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(250);
+        out.subAfter = (window.GL.state.attributes.find((a) => a.id === 'throat') || {}).sub;
+        out.subDom = pick('.ag-row[data-aid="throat"] .ag-sub')
+          ? pick('.ag-row[data-aid="throat"] .ag-sub').textContent : null;
+        out.inputStillConnected = inp.isConnected;      // 没被重渲染换掉 = 焦点不会丢
+        // 还原
+        const back = pick('.ag-tune[data-aid="throat"] [data-attr-sub]');
+        if (back) {
+          back.value = out.origSub;
+          back.dispatchEvent(new Event('change', { bubbles: true }));
+          await sleep(250);
+        }
+        out.subRestored = (window.GL.state.attributes.find((a) => a.id === 'throat') || {}).sub;
+      }
+      if (pick('.ag-row[data-aid="throat"]')) { pick('.ag-row[data-aid="throat"]').click(); await sleep(300); }
+    }
+
+    // ⑥ 技能注释栏：点开可编辑，说明写进 state 并渲染到卡片
+    const nb = pick('.skill-note-btn');
+    out.noteBtnFound = !!nb;
+    if (nb) {
+      const sid = nb.dataset.noteToggle;
+      nb.click(); await sleep(350);
+      const box = pick('.skill[data-sid="' + sid + '"] .tx-edit');
+      out.skillTxBox = !!box;
+      const ta = box ? box.querySelector('[data-skill-note]') : null;
+      if (ta) {
+        ta.value = '测试说明';
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(250);
+        out.skillNoteAfter = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
+        const txt = pick('.skill[data-sid="' + sid + '"] .skill-note-txt');
+        out.skillNoteDom = txt ? txt.textContent : null;
+        const back = pick('.skill[data-sid="' + sid + '"] [data-skill-note]');
+        if (back) {
+          back.value = '';
+          back.dispatchEvent(new Event('change', { bubbles: true }));
+          await sleep(250);
+        }
+        out.skillNoteRestored = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
+      }
+    }
+
     return out;
   })()`);
 
@@ -361,8 +477,46 @@ function check(ok, label, detail) {
       '交互：双向项微调提示为「中间最好」', String(inter.noteMid));
     check(inter.notePos !== null && /充沛|良好|一般|低迷|糟糕/.test(String(inter.notePos)),
       '交互：正向项微调提示走等级文案（越高越好）', String(inter.notePos));
+    /* 文字就地编辑 */
+    check(inter.txBoxFound === true, '编辑：点开小项后有文字编辑区');
+    check(inter.txFields === 3, '编辑：名称 / 小字 / 说明 三个字段', `实际 ${inter.txFields}`);
+    check(inter.subAfter === '（测试小字）', '编辑：小字改动写入 state', String(inter.subAfter));
+    check(inter.subDom === '（测试小字）', '编辑：行内小字就地同步（未整页重渲染）', String(inter.subDom));
+    check(inter.inputStillConnected === true,
+      '编辑：输入框未被重渲染替换（说明编辑时不会丢焦点）');
+    check(inter.subRestored === inter.origSub, '编辑：还原后小字回到原文', String(inter.subRestored));
+    /* 技能注释栏 */
+    check(inter.noteBtnFound === true, '编辑：技能卡片有注释入口', String(inter.noteBtnFound));
+    check(inter.skillTxBox === true, '编辑：点开技能注释后出现编辑区');
+    check(inter.skillNoteAfter === '测试说明', '编辑：技能说明写入 state', String(inter.skillNoteAfter));
+    check(inter.skillNoteDom === '测试说明', '编辑：技能说明即时渲染到卡片', String(inter.skillNoteDom));
+    check(inter.skillNoteRestored === '', '编辑：清空后说明被移除', String(inter.skillNoteRestored));
   } else {
     check(false, '交互：测试脚本执行失败', inter && inter.__err ? String(inter.__err).slice(0, 120) : '未知');
+  }
+
+  /* ---------- 出图：展开的小项编辑区（v1.6.0 新组件，值得单独看一眼） ---------- */
+  if (WANT_SHOT) {
+    const rect = await ev(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const row = document.querySelector('.ag-row[data-aid="move"]');
+      if (!row) return null;
+      row.click(); await sleep(500);
+      const wing = document.getElementById('wing-attrs');
+      if (!wing) return null;
+      const r = wing.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    })()`);
+    if (rect && rect.w > 100) {
+      const s = await send('Page.captureScreenshot', {
+        format: 'png',
+        clip: { x: Math.max(0, rect.x - 8), y: Math.max(0, rect.y - 8), width: rect.w + 16, height: rect.h + 16, scale: 2 },
+      });
+      const p = path.join(ROOT, 'tools', 'browser-shot-editor.png');
+      fs.writeFileSync(p, Buffer.from(s.data, 'base64'));
+      shotPaths.push(p);
+      await ev(`(() => { const r = document.querySelector('.ag-row[data-aid="move"]'); if (r) r.click(); })()`);
+    }
   }
 
   /* ---------- 汇总 ---------- */
@@ -375,6 +529,11 @@ function check(ok, label, detail) {
     [...new Set(pageErrors)].slice(0, 10).forEach((e) => console.log('  ' + e));
   }
   /* 面板明细：不是断言，是给人眼看一眼文案/数值合不合理的地面真值 */
+  if (grid && !grid.__err) {
+    console.log('\n生命刻度：' + grid.canvasW + 'px 网格 / ' + grid.wrapW + 'px 容器'
+      + '  · 位图 ' + grid.bitmapW + 'px @dpr' + grid.dpr
+      + '  · 行内宽度 ' + (grid.inlineW || '（无）'));
+  }
   if (Array.isArray(S.attrDump) && S.attrDump.length) {
     console.log('\n属性面板明细（[-] 负向 / [~] 双向）：');
     S.attrDump.forEach((l) => console.log('  ' + l));

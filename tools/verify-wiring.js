@@ -115,7 +115,7 @@ for (const f of jsFiles) {
   if (!assets.includes(`js/${f}`)) problems.push(`sw.js ASSETS 漏了 js/${f}`);
 }
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 7;   // v1.5.0：属性/技能分组体系重构，必须 ≥ v7 才能冲掉旧缓存
+const MIN_SW_VER = 8;   // v1.6.0：小字照录原文 + 前端可编辑 + 生命刻度自适应，必须 ≥ v8 才能冲掉旧缓存
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

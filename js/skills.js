@@ -6,10 +6,52 @@
   'use strict';
 
   let addingFor = null;      // 当前展开加经验行的技能 id
+  let noteFor = null;        // 当前展开注释编辑区的技能 id
   let lastXp = 10;           // 记住上次填写的 XP，减少重复输入
 
   function list() { return GL.state.skills; }
   function find(id) { return list().find((s) => s.id === id); }
+
+  /* 就地刷新卡片上的名称与小字 —— 不走 GL.changed()，
+     否则正在编辑的输入框会被整页重渲染换掉，光标和输入一起丢。 */
+  function repaintCard(s) {
+    const cardEl = document.querySelector('.skill[data-sid="' + s.id + '"]');
+    if (!cardEl) return;
+    const nameEl = cardEl.querySelector('.skill-name');
+    if (nameEl) nameEl.textContent = s.name;
+    const top = cardEl.querySelector('.skill-top');
+    const oldSub = cardEl.querySelector('.skill-sub');
+    if (s.sub) {
+      if (oldSub) {
+        oldSub.textContent = s.sub;
+      } else if (top) {
+        top.insertAdjacentHTML('afterend', '<div class="skill-sub"></div>');
+        const made = cardEl.querySelector('.skill-sub');
+        if (made) made.textContent = s.sub;
+      }
+    } else if (oldSub) {
+      oldSub.remove();
+    }
+  }
+
+  /* 说明改了 → 刷新卡片底部那行注释文本（没有就补一行，清空就删掉） */
+  function repaintCardNote(s) {
+    const cardEl = document.querySelector('.skill[data-sid="' + s.id + '"]');
+    if (!cardEl) return;
+    const holder = cardEl.querySelector('.skill-note');
+    if (!holder) return;
+    let txt = holder.querySelector('.skill-note-txt');
+    if (s.note) {
+      if (!txt) {
+        holder.insertAdjacentHTML('afterbegin', '<p class="skill-note-txt"></p>');
+        txt = holder.querySelector('.skill-note-txt');
+      }
+      txt.textContent = s.note;
+    } else if (txt) {
+      txt.remove();
+    }
+    holder.classList.toggle('has-note', !!s.note);
+  }
 
   function logLine(s, l) {
     const act = (s.actions || []).find((x) => x.id === l.actionId);
@@ -20,6 +62,7 @@
   function card(s) {
     const lv = GL.skillLevel(s);
     const open = addingFor === s.id;
+    const noteOpen = noteFor === s.id;
     const logs = (s.logs || []).slice(-8).reverse().map((l) => logLine(s, l)).join('');
     return `<div class="skill" data-sid="${s.id}">
       <div class="skill-top">
@@ -27,6 +70,7 @@
         <span class="skill-name">${GL.esc(s.name)}</span>
         <span class="skill-lv">Lv.${lv.level}</span>
       </div>
+      ${s.sub ? `<div class="skill-sub">${GL.esc(s.sub)}</div>` : ''}
       <div class="xp-bar"><i style="width:${lv.pct}%"></i></div>
       <div class="xp-line">
         <span>本级 <b>${lv.into}</b> / ${lv.need} XP</span>
@@ -43,6 +87,13 @@
         <input type="text" placeholder="做了什么（可选）" data-xp-note aria-label="做了什么">
         <button class="btn mini primary" data-xp-ok="${s.id}">✓ 加经验</button>
       </div>` : ''}
+      <div class="skill-note${s.note ? ' has-note' : ''}">
+        ${s.note ? `<p class="skill-note-txt">${GL.esc(s.note)}</p>` : ''}
+        <button type="button" class="skill-note-btn" data-note-toggle="${s.id}" aria-expanded="${noteOpen}">
+          ${noteOpen ? '× 收起注释' : ((s.note || s.sub) ? '✎ 编辑注释' : '＋ 添加注释')}
+        </button>
+        ${noteOpen ? GL.textEditBox(s, 'skill') : ''}
+      </div>
       ${logs ? `<details class="hist"><summary>成长记录（${(s.logs || []).length} 条）</summary><ul>${logs}</ul></details>` : ''}
     </div>`;
   }
@@ -127,6 +178,15 @@
     el.dataset.bound = '1';
 
     el.addEventListener('click', (e) => {
+      // 展开 / 收起注释编辑区
+      const nt = e.target.closest('[data-note-toggle]');
+      if (nt) {
+        noteFor = noteFor === nt.dataset.noteToggle ? null : nt.dataset.noteToggle;
+        render();
+        const inp = el.querySelector('.tx-edit [data-skill-name]');
+        if (inp) { inp.focus(); inp.select(); }
+        return;
+      }
       // 展开 / 收起加经验行
       const add = e.target.closest('[data-add]');
       if (add) {
@@ -155,7 +215,7 @@
         const per = Math.max(1, Number(el.querySelector('#s-xp').value) || 100);
         const group = el.querySelector('#s-group').value || 'misc';
         if (!name) { GL.toast('先填写技能名', 'err'); return; }
-        list().push({ id: GL.uid(), name, emoji, group, xp: 0, xpPerLevel: per, actions: [], logs: [] });
+        list().push({ id: GL.uid(), name, sub: '', note: '', emoji, group, xp: 0, xpPerLevel: per, actions: [], logs: [] });
         GL.toast('技能「' + name + '」已创建', 'ok');
         GL.changed();
         return;
@@ -171,6 +231,23 @@
     });
 
     el.addEventListener('change', (e) => {
+      /* 名称 / 小字 / 说明：写盘 + 就地刷新卡片上的名称与小字，不重渲染
+         （重渲染会把正在编辑的输入框连光标一起换掉） */
+      const d = e.target.dataset;
+      const txKey = d.skillName !== undefined ? 'name'
+        : (d.skillSub !== undefined ? 'sub' : (d.skillNote !== undefined ? 'note' : null));
+      if (txKey) {
+        const box = e.target.closest('[data-sid]');
+        const s = box ? find(box.dataset.sid) : null;
+        if (!s) return;
+        const val = txKey === 'name' ? String(e.target.value).trim() : String(e.target.value);
+        if (txKey === 'name' && !val) { GL.toast('名称不能为空', 'err'); e.target.value = s.name; return; }
+        s[txKey] = val;
+        GL.save();
+        if (txKey === 'note') repaintCardNote(s);
+        else repaintCard(s);
+        return;
+      }
       /* 切换所属分组 */
       if (e.target.dataset.skillGroup !== undefined) {
         const s = find(e.target.dataset.skillGroup);
@@ -186,6 +263,12 @@
     el.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       if (e.target.id === 's-name') { el.querySelector('#s-add').click(); return; }
+      /* 注释区的单行输入按 Enter = 提交（textarea 留给换行） */
+      if (e.target.tagName === 'INPUT'
+          && (e.target.dataset.skillName !== undefined || e.target.dataset.skillSub !== undefined)) {
+        e.target.blur();
+        return;
+      }
       if (e.target.dataset.xpIn !== undefined || e.target.dataset.xpNote !== undefined) {
         const box = e.target.closest('.xp-add');
         if (box) box.querySelector('[data-xp-ok]').click();

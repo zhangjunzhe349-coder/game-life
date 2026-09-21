@@ -311,10 +311,11 @@ b { font-weight: 700; }
 }
 .ag.neg .ag-bar > i { background: var(--danger); }
 
-/* 折叠：max-height 过渡。属性组最多 6 行（约 150px），500px 余量充足 */
+/* 折叠：max-height 过渡。属性组最多 6 行，但点开微调会额外长出
+   数值条 + 文字编辑区（约 150px），所以余量给足，否则编辑区会被裁掉 */
 .ag-items {
   display: flex; flex-direction: column; gap: 1px;
-  max-height: 500px; opacity: 1; overflow: hidden;
+  max-height: 780px; opacity: 1; overflow: hidden;
   transition: max-height var(--dur-base) var(--ease-out), opacity var(--dur-fast) ease-out;
 }
 .ag.shut .ag-items { max-height: 0; opacity: 0; }
@@ -339,9 +340,12 @@ b { font-weight: 700; }
   transition: color var(--dur-fast) ease-out;
 }
 .ag-row:hover .ag-t { color: var(--text); }
+/* 小字按原文照录后可能较长（如「（活动半径）（久坐值）」），
+   用可收缩 + 省略号兜住，别把数值和刻度条挤出格线 */
 .ag-sub {
-  flex: none; font-size: var(--fs-2xs); color: var(--faint);
-  white-space: nowrap;
+  flex: 0 1 auto; min-width: 0;
+  font-size: var(--fs-2xs); color: var(--faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .ag-num {
   font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 500;
@@ -373,10 +377,11 @@ b { font-weight: 700; }
 
 /* —— 第 3 级：点开才出现的微调 —— */
 .ag-tune {
-  display: flex; align-items: center; gap: var(--s1);
-  padding: 5px 0 7px;
+  display: flex; flex-direction: column; gap: var(--s2);
+  padding: 5px 0 9px;
   animation: agTuneIn var(--dur-fast) var(--ease-out) both;
 }
+.ag-tune-row { display: flex; align-items: center; gap: var(--s1); }
 @keyframes agTuneIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 .ag-tune .btn.mini { min-width: 34px; height: 26px; padding: 0 6px; font-size: var(--fs-xs); }
 .ag-tune input[type="number"] { width: 58px; height: 26px; text-align: center; font-size: var(--fs-xs); }
@@ -384,6 +389,31 @@ b { font-weight: 700; }
   margin-left: auto; font-size: var(--fs-2xs); color: var(--faint);
   letter-spacing: 0.06em; white-space: nowrap;
 }
+
+/* —— 文字编辑区：名称 / 小字 / 说明 —— 属性与技能共用（GL.textEditBox） ——
+   单列堆叠：属性翼栏只有约 300px，双列会把输入框压到 130px 宽，
+   照录原文的长小字（如「（活动半径）（久坐值）」）根本看不全 */
+.tx-edit {
+  display: flex; flex-direction: column; gap: var(--s2);
+  padding: var(--s2) var(--s3) var(--s3);
+  background: rgba(255, 255, 255, 0.022);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.tx-field { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.tx-key {
+  flex: none; width: 34px;
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.1em; color: var(--faint);
+}
+.tx-field input { flex: 1 1 auto; min-width: 0; height: 30px; min-height: 30px; padding: 0 var(--s2); font-size: var(--fs-xs); letter-spacing: 0.03em; }
+.tx-field textarea {
+  flex: 1 1 auto; min-width: 0;
+  height: auto; min-height: 46px; padding: 5px var(--s2);
+  font-size: var(--fs-xs); line-height: 1.6; letter-spacing: 0.03em;
+}
+/* 说明那一行标签顶对齐，多行文本才不歪 */
+.tx-field.wide { align-items: flex-start; }
+.tx-field.wide .tx-key { padding-top: 6px; }
 
 /* —— 技能页分组 —— */
 .sg + .sg { margin-top: var(--s5); }
@@ -406,6 +436,34 @@ b { font-weight: 700; }
   letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--faint); margin-bottom: 6px;
 }
+
+/* —— 技能卡片的小字注解 + 注释栏 —— */
+.skill-sub {
+  margin-top: 3px; line-height: 1.5;
+  font-size: var(--fs-2xs); color: var(--faint); letter-spacing: 0.04em;
+  word-break: break-word;
+}
+.skill-note {
+  display: flex; flex-direction: column; gap: var(--s2);
+  margin-top: var(--s3);
+}
+/* 原文里的换行要照原样保留（如「嘈杂值」的两行说明） */
+.skill-note-txt {
+  font-size: var(--fs-xs); color: var(--muted);
+  white-space: pre-line;
+  padding-left: var(--s3);
+  border-left: 2px solid var(--line-strong);
+}
+.skill-note-btn {
+  appearance: none; background: none; border: 0; padding: 0;
+  align-self: flex-start;
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.14em; color: var(--faint);
+  cursor: pointer;
+  transition: color var(--dur-fast) ease-out;
+}
+.skill-note-btn:hover { color: var(--accent); }
+.skill-note-btn[aria-expanded="true"] { color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {
   .ag-items, .ag-bar > i, .ag-track > i, .ag-chev, .ag-tune { transition: none; animation: none; }
@@ -674,6 +732,9 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 .life-stat span { font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.2em; color: var(--faint); text-transform: uppercase; }
 .life-stat.hl b { color: var(--xp); }
 #life-grid-wrap { margin-top: var(--s4); overflow-x: auto; padding-bottom: var(--s2); }
+/* 列宽由 js/life.js 按容器宽度算好后直接写成行内 px，这里只保证它是块级、
+   不被行内基线的空隙顶出几像素 */
+#life-grid { display: block; }
 .life-legend { display: flex; gap: var(--s5); flex-wrap: wrap; margin-top: var(--s3); color: var(--muted); font-size: var(--fs-xs); letter-spacing: 0.08em; }
 .life-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 7px; vertical-align: -2px; }
 

@@ -41,7 +41,7 @@
   function miniRow(a) {
     const p = pct(a);
     const open = tuneFor === a.id;
-    const sub = a.sub ? `<span class="ag-sub">${GL.esc(a.sub)}</span>` : '';
+    const sub = a.sub ? `<span class="ag-sub" title="${GL.esc(a.sub)}">${GL.esc(a.sub)}</span>` : '';
     return `<button type="button" class="ag-row ${pol(a)}${open ? ' tune-open' : ''}"
         data-aid="${a.id}" aria-expanded="${open}"
         title="${GL.esc(a.name)} · ${GL.POL_NAME[a.polarity] || GL.POL_NAME.pos}">
@@ -52,13 +52,16 @@
         ${a.polarity === 'mid' ? '<b class="ag-ideal" title="理想区间"></b>' : ''}
       </span>
     </button>
-    ${open ? `<div class="ag-tune" data-aid="${a.id}">
-      <button type="button" class="btn mini" data-attr-step="-5">−5</button>
-      <button type="button" class="btn mini" data-attr-step="-1">−1</button>
-      <input type="number" data-attr-set value="${a.value}" min="${a.min}" max="${a.max}" aria-label="${GL.esc(a.name)} 数值">
-      <button type="button" class="btn mini" data-attr-step="1">＋1</button>
-      <button type="button" class="btn mini" data-attr-step="5">＋5</button>
-      <span class="ag-tune-note">${GL.esc(tuneNote(a))}</span>
+      ${open ? `<div class="ag-tune" data-aid="${a.id}">
+      <div class="ag-tune-row">
+        <button type="button" class="btn mini" data-attr-step="-5">−5</button>
+        <button type="button" class="btn mini" data-attr-step="-1">−1</button>
+        <input type="number" data-attr-set value="${a.value}" min="${a.min}" max="${a.max}" aria-label="${GL.esc(a.name)} 数值">
+        <button type="button" class="btn mini" data-attr-step="1">＋1</button>
+        <button type="button" class="btn mini" data-attr-step="5">＋5</button>
+        <span class="ag-tune-note">${GL.esc(tuneNote(a))}</span>
+      </div>
+      ${GL.textEditBox(a, 'attr')}
     </div>` : ''}`;
   }
 
@@ -72,7 +75,7 @@
       <button class="ag-head" data-ag-toggle="${g.id}" aria-expanded="${!shut}">
         <span class="ag-glyph" aria-hidden="true">${g.emoji}</span>
         <span class="ag-name">${GL.esc(g.name)}</span>
-        <span class="ag-tag">${GL.esc(g.note || '')}</span>
+        <span class="ag-tag" title="${GL.esc(g.note || '')}">${GL.esc(g.note || '')}</span>
         <span class="ag-mean">${mean}</span>
         <span class="ag-chev" aria-hidden="true">▾</span>
       </button>
@@ -207,6 +210,20 @@
     ];
   }
 
+  /* 文字字段改动后就地刷新刻度行上的「名称 + 小字」。
+     走 DOM 直改而不是 GL.changed()：重渲染会把正在编辑的输入框整个换掉，
+     光标和输入内容都会丢，编辑体验会碎掉。 */
+  function repaintRow(a) {
+    const row = document.querySelector('.ag-row[data-aid="' + a.id + '"]');
+    if (!row) return;
+    const lab = row.querySelector('.ag-label');
+    if (lab) {
+      lab.innerHTML = '<span class="ag-t">' + GL.esc(a.name) + '</span>'
+        + (a.sub ? '<span class="ag-sub" title="' + GL.esc(a.sub) + '">' + GL.esc(a.sub) + '</span>' : '');
+    }
+    row.title = a.name + ' · ' + (GL.POL_NAME[a.polarity] || GL.POL_NAME.pos);
+  }
+
   function bind() {
     const el = document.getElementById('wing-attrs');
     if (!el || el.dataset.bound) return;
@@ -293,8 +310,23 @@
       }
     });
 
-    /* 直接输入数值 + 改刻度语义 */
+    /* 直接输入数值 + 改刻度语义 + 编辑文字 */
     el.addEventListener('change', (e) => {
+      /* 名称 / 小字 / 说明：三选一，命中就写盘并就地刷新小字，不重渲染 */
+      const d = e.target.dataset;
+      const txKey = d.attrName !== undefined ? 'name'
+        : (d.attrSub !== undefined ? 'sub' : (d.attrNote !== undefined ? 'note' : null));
+      if (txKey) {
+        const box = e.target.closest('.ag-tune');
+        const a = box ? find(box.dataset.aid) : null;
+        if (!a) return;
+        const val = txKey === 'name' ? String(e.target.value).trim() : String(e.target.value);
+        if (txKey === 'name' && !val) { GL.toast('名称不能为空', 'err'); e.target.value = a.name; return; }
+        a[txKey] = val;
+        GL.save();
+        if (txKey !== 'note') repaintRow(a);
+        return;
+      }
       if (e.target.dataset.attrSet !== undefined) {
         const box = e.target.closest('.ag-tune');
         const a = box ? find(box.dataset.aid) : null;
@@ -318,11 +350,24 @@
 
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && e.target.id === 'a-name') { el.querySelector('#a-add').click(); return; }
+      /* 单行文字框里按 Enter = 提交（textarea 不拦，Enter 要留给换行） */
+      if (e.key === 'Enter' && e.target.tagName === 'INPUT'
+          && (e.target.dataset.attrName !== undefined || e.target.dataset.attrSub !== undefined)) {
+        e.target.blur();
+        return;
+      }
       if (e.key === 'Enter' && e.target.dataset.attrSet !== undefined) {
         const box = e.target.closest('.ag-tune');
         const a = box ? find(box.dataset.aid) : null;
         const v = Number(e.target.value);
         if (a && !isNaN(v)) { tuneFor = null; setValue(a, v); }
+      }
+      /* Esc 收起微调区。先 blur 让正在编辑的字段触发 change 落盘，
+         否则未失焦的改动会被随后的重渲染直接丢掉。 */
+      if (e.key === 'Escape' && e.target.closest && e.target.closest('.ag-tune')) {
+        if (e.target.blur) e.target.blur();
+        tuneFor = null;
+        GL.changed();
       }
     });
   }
