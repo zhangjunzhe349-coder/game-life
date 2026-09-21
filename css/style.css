@@ -735,6 +735,12 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 /* 列宽由 js/life.js 按容器宽度算好后直接写成行内 px，这里只保证它是块级、
    不被行内基线的空隙顶出几像素 */
 #life-grid { display: block; }
+/* 排布读数：一行小字说明当前是几行几列、每格多少 px —— 让「自适应」看得见 */
+.life-scale {
+  margin-top: var(--s3);
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.04em; color: var(--faint);
+}
 .life-legend { display: flex; gap: var(--s5); flex-wrap: wrap; margin-top: var(--s3); color: var(--muted); font-size: var(--fs-xs); letter-spacing: 0.08em; }
 .life-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 7px; vertical-align: -2px; }
 

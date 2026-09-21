@@ -286,45 +286,97 @@ function check(ok, label, detail) {
     await ev(`(() => { const b = document.querySelector('.tab[data-tab="hud"]'); if (b) b.click(); })()`);
   }
 
-  /* ---------- 生命刻度：列宽必须跟着容器宽度自适应（v1.6.0） ----------
-     旧实现的坑：量的是 canvas.clientWidth（canvas 无 CSS 宽度时默认 300px），
-     于是网格永远只画出左边一小块。这里直接对比 canvas 与容器的实际宽度。 */
-  const grid = await ev(`(async () => {
+  /* ---------- 生命刻度：格子固定大小 + 列数随容器宽度自适应（v1.6.1） ----------
+     核心行为：列数由宽度算、行数是结果 —— 整块永远铺满宽度，且不高过高度上限。
+     不只量宽度，还真的改一次视口宽度，看列数有没有跟着重排。 */
+  const readGrid = `(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const b = document.querySelector('.tab[data-tab="life"]');
-    if (b) b.click();
-    await sleep(700);
+    await sleep(500);
     const c = document.getElementById('life-grid');
     const w = document.getElementById('life-grid-wrap');
     if (!c || !w) return { err: 'canvas or wrap missing' };
-    const cs = getComputedStyle(c);
-    const out = {
+    const dpr = window.devicePixelRatio || 1;
+    let rightInk = 0, whiteInk = 0;
+    try {
+      const img = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+      const d = img.data;
+      const rightFrom = c.width - Math.round(24 * dpr);
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] <= 20) continue;
+        const x = (i / 4) % c.width;
+        if (x >= rightFrom) rightInk++;
+        if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) whiteInk++;
+      }
+    } catch (e) { rightInk = -1; whiteInk = -1; }
+    return {
       canvasW: Math.round(c.getBoundingClientRect().width),
       canvasH: Math.round(c.getBoundingClientRect().height),
       wrapW: Math.round(w.clientWidth),
       bitmapW: c.width,
-      dpr: window.devicePixelRatio || 1,
-      inlineW: c.style.width,
-      display: cs.display,
+      dpr: dpr,
       scrollX: w.scrollWidth > w.clientWidth + 1,
+      rightInk: rightInk,
+      whiteInk: whiteInk,
+      plan: window.GL.lifeGrid || null,
+      scaleText: (document.getElementById('life-scale') || {}).textContent || '',
     };
-    // 切回总览：后面的交互测试要操作属性面板，它必须可见（隐藏元素高度为 0）
-    const back = document.querySelector('.tab[data-tab="hud"]');
-    if (back) back.click();
-    await sleep(400);
-    return out;
-  })()`);
+  })()`;
 
-  if (grid && !grid.__err) {
+  const backToHud = `(() => { const b = document.querySelector('.tab[data-tab="hud"]'); if (b) b.click(); return true; })()`;
+
+  await ev(`(() => { const b = document.querySelector('.tab[data-tab="life"]'); if (b) b.click(); return true; })()`);
+  const grid = await ev(readGrid);
+
+  // 真改一次视口宽度，验证「列数由宽度算」确实生效
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1000, height: H, deviceScaleFactor: 1, mobile: false,
+  });
+  const gridNarrow = await ev(readGrid);
+  await send('Emulation.clearDeviceMetricsOverride');
+  await ev(backToHud);
+  await new Promise((r) => setTimeout(r, 400));
+
+  if (grid && !grid.__err && grid.plan) {
+    const p = grid.plan;
     check(typeof grid.canvasW === 'number' && grid.canvasW > 320,
       '生命刻度：网格宽度不再是默认的 300px 底', `${grid.canvasW}px`);
     check(grid.canvasW >= grid.wrapW - 6 && grid.canvasW <= grid.wrapW + 2,
-      '生命刻度：列宽铺满容器宽度（自适应）',
+      '生命刻度：整块铺满容器宽度（自适应）',
       `canvas ${grid.canvasW}px / 容器 ${grid.wrapW}px`);
     check(grid.scrollX === false, '生命刻度：不产生横向滚动条（没有溢出）');
-    check(grid.canvasH > 300, '生命刻度：网格有完整高度（80 行）', `${grid.canvasH}px`);
+    check(p.cell >= 4 && p.cell <= 14,
+      '生命刻度：格子边长固定在一档内（没有被拉伸变形）', `每格 ${p.cell}px`);
+    check(p.rows === Math.ceil(p.totalWeeks / p.cols),
+      '生命刻度：行列关系正确（行数 = ceil(总周数 ÷ 列数)）',
+      `${p.rows} 行 × ${p.cols} 列 / 共 ${p.totalWeeks} 周`);
+    check(p.cols * p.cell + (p.cols - 1) * 2 + p.remainder === p.avail - 42,
+      '生命刻度：余数分摊后恰好占满可用宽度（不溢出也不留缝）',
+      `格子区 ${p.cols * p.cell + (p.cols - 1) * 2}px + 余数 ${p.remainder}px`);
+    check(grid.canvasH <= 520 + 8,
+      '生命刻度：整块高度受限，一生一眼看全（旧版会随宽度涨到 1850px）', `${grid.canvasH}px`);
+    check(grid.rightInk > 0,
+      '生命刻度：网格画到了容器最右缘（旧版这里是整片空白）', `${grid.rightInk} px`);
+    check(grid.whiteInk > 60,
+      '生命刻度：十年节点白圈已绘制（按周序号定位，不依赖行号）', `${grid.whiteInk} px`);
+    check(/行 × \d+ 列/.test(grid.scaleText),
+      '生命刻度：排布读数已渲染（几行几列 / 每格几 px）', String(grid.scaleText).slice(0, 60));
   } else {
     check(false, '生命刻度：测量失败', grid && grid.err ? String(grid.err) : '未知');
+  }
+
+  if (gridNarrow && !gridNarrow.__err && gridNarrow.plan && grid.plan) {
+    check(gridNarrow.plan.cols < grid.plan.cols,
+      '生命刻度：视口变窄后列数真的减少了（重排生效）',
+      `${grid.plan.cols} 列 → ${gridNarrow.plan.cols} 列`);
+    check(Math.abs(gridNarrow.canvasW - gridNarrow.wrapW) <= 6,
+      '生命刻度：窄视口下仍然铺满容器',
+      `canvas ${gridNarrow.canvasW}px / 容器 ${gridNarrow.wrapW}px`);
+    check(gridNarrow.canvasH <= 520 + 8,
+      '生命刻度：窄视口下整块依然不高过上限（自动降一档格子）',
+      `${gridNarrow.plan.cell}px 格子 → ${gridNarrow.canvasH}px 高`);
+  } else {
+    check(false, '生命刻度：窄视口重排测量失败',
+      gridNarrow && gridNarrow.err ? String(gridNarrow.err) : '未知');
   }
 
   /* ---------- 交互测试：折叠 + 微调 + 就地编辑（v1.5.0 / v1.6.0 新组件，必须真点一遍） ---------- */
