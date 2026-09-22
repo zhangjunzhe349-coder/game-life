@@ -1,15 +1,19 @@
 {
   "name": "Game Life · 人生游戏面板",
   "short_name": "Game Life",
-  "description": "3D形象 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度",
+  "description": "人物立绘 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 · 数据存于本机，离线可用",
+  "lang": "zh-CN",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#08090d",
   "theme_color": "#08090d",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

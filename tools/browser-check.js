@@ -571,6 +571,124 @@ function check(ok, label, detail) {
     }
   }
 
+  /* ---------- 手机视口（v1.7.0）：真机尺寸下布局与字体是否成立 ----------
+     为什么必须单独测：桌面全绿不代表手机能用 —— 这一层测的是「视口变窄后那些媒体查询
+     到底有没有生效」。用 CDP 把视口切成 iPhone 尺寸（390×844 / dpr 3 / mobile），
+     验证底部标签栏、横向溢出、安全区留白、输入框字号，以及**字体是不是真的从本机加载**。
+     最后一项是 v1.7.0 的核心改动，也是唯一能证明「已切断 Google Fonts」的硬证据。 */
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 390, height: 844, deviceScaleFactor: 3, mobile: true,
+  });
+  await ev(`(() => { const b = document.querySelector('.tab[data-tab="hud"]'); if (b) b.click(); return true; })()`);
+  await new Promise((r) => setTimeout(r, 700));
+
+  const mob = await ev(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // 先展开一个小项，让文字编辑区出现，否则量不到输入框字号
+    const row = document.querySelector('.ag-row[data-aid="throat"]');
+    if (row) { row.click(); await sleep(500); }
+
+    const side = document.querySelector('.side');
+    const main = document.getElementById('main');
+    const tabs = [...document.querySelectorAll('.tab')];
+    const cs = side ? getComputedStyle(side) : null;
+    const r = side ? side.getBoundingClientRect() : null;
+    const brand = document.querySelector('.brand');
+    const input = document.querySelector('.tx-edit input');
+
+    // 字体地面真值：看实际发出的资源请求，而不是猜
+    const res = performance.getEntriesByType('resource').map((e) => e.name);
+    // 注意：这段代码是塞进模板字符串传给浏览器的，正则里的反斜杠必须写双份 \\
+    // 否则会被这一层 JS 先吃掉（\. 变 .、\? 变 ?），到浏览器就成了 /.woff2($|?)/ 这种非法正则
+    const fontReqs = res.filter((n) => /\\.woff2($|\\?)/.test(n));
+    const googleReqs = res.filter((n) => /fonts\\.(googleapis|gstatic)\\.com/.test(n));
+    if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (e) {} }
+
+    return {
+      vw: window.innerWidth,
+      sidePos: cs ? cs.position : null,
+      sideGapBottom: r ? Math.round(window.innerHeight - r.bottom) : null,
+      sideW: r ? Math.round(r.width) : null,
+      tabCount: tabs.length,
+      tabMinH: tabs.length ? Math.round(Math.min(...tabs.map((t) => t.getBoundingClientRect().height))) : -1,
+      brandHidden: brand ? getComputedStyle(brand).display === 'none' : null,
+      footHidden: (() => { const f = document.querySelector('.side-foot'); return f ? getComputedStyle(f).display === 'none' : null; })(),
+      mainPadBottom: main ? Math.round(parseFloat(getComputedStyle(main).paddingBottom)) : null,
+      scrollX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+      docW: document.documentElement.scrollWidth,
+      clientW: document.documentElement.clientWidth,
+      inputFont: input ? parseFloat(getComputedStyle(input).fontSize) : null,
+      fontReqs: fontReqs.length,
+      googleReqs: googleReqs.length,
+      fontSample: fontReqs.length ? String(fontReqs[0]).split('/').pop() : null,
+      chakraOk: document.fonts ? document.fonts.check('500 14px "Chakra Petch"') : null,
+      monoOk: document.fonts ? document.fonts.check('400 14px "JetBrains Mono"') : null,
+      // 按「实际已加载的 FontFace 数」判断，不按具体字重：
+      // 浏览器不会加载页面从未使用过的字重（Chakra Petch 500/600 就没被用到），
+      // 所以 check('500 ...') 为 false 是正常的，用它做断言属于预期写错。
+      chakraLoaded: document.fonts ? [...document.fonts].filter((f) => f.family.indexOf('Chakra Petch') >= 0 && f.status === 'loaded').length : -1,
+      monoLoaded: document.fonts ? [...document.fonts].filter((f) => f.family.indexOf('JetBrains Mono') >= 0 && f.status === 'loaded').length : -1,
+    };
+  })()`);
+
+  if (mob && !mob.__err) {
+    check(mob.sidePos === 'fixed',
+      '手机：侧栏变为固定定位的底部标签栏', `position: ${mob.sidePos}`);
+    check(mob.sideGapBottom !== null && mob.sideGapBottom >= 8 && mob.sideGapBottom <= 24,
+      '手机：标签栏贴底悬浮（含安全区留白）', `距底 ${mob.sideGapBottom}px`);
+    check(mob.sideW !== null && mob.sideW >= mob.vw - 32,
+      '手机：标签栏横向铺开，不是窄条', `${mob.sideW}px / 视口 ${mob.vw}px`);
+    check(mob.tabCount === 4, '手机：4 个页签全部保留', `实际 ${mob.tabCount}`);
+    check(mob.tabMinH >= 44,
+      '手机：页签触摸目标 ≥ 44px（手指点得中）', `最矮 ${mob.tabMinH}px`);
+    check(mob.brandHidden === true && mob.footHidden === true,
+      '手机：品牌区与页脚隐藏，不占标签栏空间');
+    check(mob.mainPadBottom !== null && mob.mainPadBottom >= 112,
+      '手机：主区底部留白够高，最后一屏不会被悬浮栏压住', `padding-bottom ${mob.mainPadBottom}px`);
+    check(mob.scrollX === false,
+      '手机：无横向溢出（不出现左右拖动）', `内容 ${mob.docW}px / 视口 ${mob.clientW}px`);
+    check(mob.inputFont !== null && mob.inputFont >= 16,
+      '手机：输入框字号 ≥ 16px（否则 iOS 聚焦时会自动放大整页）', `${mob.inputFont}px`);
+
+    /* 字体：唯一能证明「已切断 Google Fonts 且真正离线可用」的硬证据 */
+    check(mob.fontReqs > 0,
+      '字体：从本机加载了 woff2（不是系统回退字体）',
+      `${mob.fontReqs} 个请求，如 ${mob.fontSample}`);
+    check(mob.googleReqs === 0,
+      '字体：没有任何 Google Fonts 请求（国内可达性 + 首屏不阻塞）',
+      `外部字体请求 ${mob.googleReqs} 个`);
+    check(mob.chakraLoaded > 0 && mob.monoLoaded > 0,
+      '字体：两款自托管字体均已实际加载（不是系统回退字体）',
+      `Chakra Petch ${mob.chakraLoaded} 个字重 / JetBrains Mono ${mob.monoLoaded} 个`);
+  } else {
+    check(false, '手机视口：测量失败', mob && mob.__err ? String(mob.__err) : '未知');
+  }
+
+  /* 手机尺寸截图：三个主页面各出一张，直观看窄屏布局。
+     切页要留足时间 —— 生命页的 canvas 是切过去那一刻才绘制的。 */
+  if (WANT_SHOT) {
+    for (const [tab, name] of [['hud', 'mobile'], ['skills', 'mobile-skills'], ['life', 'mobile-life']]) {
+      await ev(`(() => { window.scrollTo(0, 0); const b = document.querySelector('.tab[data-tab="${tab}"]'); if (b) b.click(); return true; })()`);
+      await new Promise((r) => setTimeout(r, tab === 'hud' ? 200 : 900));
+      try {
+        const s = await send('Page.captureScreenshot', {
+          format: 'png',
+          clip: { x: 0, y: 0, width: 390, height: 844, scale: 1 },
+        });
+        const p = path.join(ROOT, 'tools', 'browser-shot-' + name + '.png');
+        fs.writeFileSync(p, Buffer.from(s.data, 'base64'));
+        shotPaths.push(p);
+      } catch (e) { /* 截图失败不影响断言结果 */ }
+    }
+  }
+
+  // 收尾：先切回总览页，收起展开的编辑区，再恢复桌面视口
+  await ev(`(() => { window.scrollTo(0, 0); const b = document.querySelector('.tab[data-tab="hud"]'); if (b) b.click(); return true; })()`);
+  await new Promise((r) => setTimeout(r, 400));
+  await ev(`(() => { const r = document.querySelector('.ag-row[data-aid="throat"]'); if (r) r.click(); return true; })()`);
+  await send('Emulation.clearDeviceMetricsOverride');
+  await new Promise((r) => setTimeout(r, 300));
+
   /* ---------- 汇总 ---------- */
   console.log('=== 浏览器冒烟测试 ===\n');
   for (const r of results) {
@@ -585,6 +703,15 @@ function check(ok, label, detail) {
     console.log('\n生命刻度：' + grid.canvasW + 'px 网格 / ' + grid.wrapW + 'px 容器'
       + '  · 位图 ' + grid.bitmapW + 'px @dpr' + grid.dpr
       + '  · 行内宽度 ' + (grid.inlineW || '（无）'));
+  }
+  if (mob && !mob.__err) {
+    console.log('\n手机视口（390×844 @dpr3）：标签栏 ' + mob.sidePos
+      + ' · 距底 ' + mob.sideGapBottom + 'px · 宽 ' + mob.sideW + 'px'
+      + ' · 页签 ' + mob.tabCount + ' 个（最矮 ' + mob.tabMinH + 'px）'
+      + ' · 主区底部留白 ' + mob.mainPadBottom + 'px'
+      + ' · 输入框 ' + mob.inputFont + 'px');
+    console.log('字体请求：本机 woff2 ' + mob.fontReqs + ' 个 · Google Fonts ' + mob.googleReqs + ' 个'
+      + ' · 已加载字重 Chakra Petch ' + mob.chakraLoaded + ' / JetBrains Mono ' + mob.monoLoaded);
   }
   if (Array.isArray(S.attrDump) && S.attrDump.length) {
     console.log('\n属性面板明细（[-] 负向 / [~] 双向）：');

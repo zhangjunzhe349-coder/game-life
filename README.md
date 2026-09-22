@@ -6,13 +6,70 @@
 ## 运行
 
 ```bash
-# 任意静态服务器（Service Worker 需要 http 协议，直接双击 file:// 打开则无离线能力）
+# 任意静态服务器
 cd game-life
 python -m http.server 8080
 # 浏览器打开 http://localhost:8080
 ```
 
-手机端：用局域网访问同一地址，浏览器菜单 →「添加到主屏幕」。
+## 离线运行与手机端安装（v1.7.0）
+
+### 前提：Service Worker 只在「安全上下文」注册
+
+只有 `https://` 与 `localhost` 算安全上下文，**其它一律不注册 SW**：
+
+| 打开方式 | 页面能看 | 离线可用 | 能装到桌面 |
+|---|---|---|---|
+| 双击 `index.html`（`file://`） | 可以 | **不行**（SW 不注册） | 不行 |
+| 局域网 IP `http://192.168.x.x:8080` | 可以 | **不行**（SW 不注册） | 多数浏览器拒绝 |
+| `http://localhost` | 可以 | 可以 | 可以（仅本机） |
+| **https 托管** | 可以 | **可以** | **可以** |
+
+**所以「手机 + 离线」的正解只有一个：把它放到 https 地址上，再从手机装到主屏幕。**
+（v1.6.1 及更早的 README 写的是「局域网访问后添加到主屏幕」，那是错的 —— 那样装出来的图标没有离线能力。）
+
+### 部署（任选其一，都免费且自动签发证书）
+
+- **Cloudflare Pages**：把 `game-life/` 目录拖进控制台即可，无需 Git
+- **GitHub Pages**：仓库推上去，Settings → Pages 选分支
+- **Vercel / Netlify**：同样支持拖拽部署
+
+### 装到手机
+
+1. 手机浏览器打开那个 https 地址，确认页面正常
+2. **iOS**：Safari → 分享 → 「添加到主屏幕」；**安卓**：Chrome → 菜单 → 「添加到主屏幕」
+3. 之后从主屏幕图标进入：全屏无地址栏、断网可用
+
+> iOS 必须用 **Safari** 添加（Chrome for iOS 走的是同一内核但入口不完整）。
+> 图标已经是 PNG（`apple-touch-icon.png` 180×180）—— iOS 不认 SVG，用 SVG 会显示成白块。
+
+### 数据归属：localStorage 按 origin 隔离
+
+这是部署前必须知道的一件事 —— 数据绑在**协议 + 域名 + 端口**上：
+
+- **换地址就换数据**：`file://`、`http://192.168.x.x:8080`、`https://xxx.pages.dev` 三者互不可见。
+  换地址之前，先在「设置」页**导出备份**，到新地址再导入。
+- **iOS 上是两份独立存储**：Safari 标签页里的数据，与主屏幕 App 里的数据**不互通**；
+  安卓 Chrome 的 WebAPK 同理。建议**固定只用一种方式录入**（推荐就用在主屏幕 App 里）。
+- **系统可能清理站点数据**：iOS 的 ITP 会在长期不用时清理；已添加到主屏幕的 PWA 有一定豁免，但不保证。
+
+所以设置页那两个按钮（⬇ 导出备份 / ⬆ 导入备份）不是可选项，是**目前唯一的跨设备手段**，建议定期导出。
+想要真正的自动同步只能接后端 —— 纯前端做不到。
+
+### 自检离线是否真的生效
+
+1. DevTools → Application → Service Workers：确认状态是 `activated`
+2. Application → Cache Storage → `gamelife-v10`：应有 **23 项**（含 6 个字体、5 个图标）
+3. Network 面板勾上 **Offline** 后刷新：页面应完整呈现，且 logo 等展示字的字形**不退化**
+   （若字形变了，说明字体没进缓存）
+
+### 字体为什么必须自托管
+
+原先引的是 Google Fonts，两个问题：`fonts.googleapis.com` 在国内不可达，字体永远加载不到；
+而且 `<link rel="stylesheet">` 是**渲染阻塞**资源，浏览器要等它失败才继续画首屏。
+现在两款字体（Chakra Petch / JetBrains Mono，各 3 个字重，共约 95KB）都在 `fonts/` 里，
+CSS 用 `@font-face` 引用，`sw.js` 的 `ASSETS` 一并缓存 —— **整个页面零跨域请求**。
+浏览器校对方式：Network 面板应只看到本机 `fonts/*.woff2`，看不到任何 `fonts.gstatic.com` 请求。
 
 ## 目录结构
 
@@ -29,12 +86,20 @@ game-life/
 ├── js/life.js              # 生命周刻度
 ├── js/app.js               # 入口：导航、顶栏读数、设置、启动流程
 ├── tools/verify-portrait.js # 无头图层校验：立绘 36 用例
-├── tools/verify-wiring.js  # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / sw 版本
+├── tools/verify-wiring.js  # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / 资源存在性 / sw 版本
 ├── tools/verify-migrate.js # 数据迁移校验：v1 → v2 → v3（41 项断言，防丢历史/防改写原文小字）
-├── tools/browser-check.js  # 浏览器冒烟：真跑页面 + 抓异常 + 渲染断言 + 交互测试 + 面板明细 + 出 PNG
+├── tools/browser-check.js  # 浏览器冒烟：桌面 + 手机视口 / 渲染断言 / 交互测试 / 面板明细 / 出 PNG
+├── tools/gen-icons.js      # 由 icon.svg 生成各尺寸 PNG 图标（含 maskable 与 iOS 尺寸）
+├── tools/patch-index-mobile.js # 给 index.html 打 PWA 资源补丁（幂等，顺带清除编辑器注入属性）
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
 ├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
-├── sw.js                   # Service Worker（离线缓存）
+├── fonts/                  # 自托管字体 6 个 woff2（离线可用，不依赖 Google Fonts）
+├── icon.svg                # 矢量图标源文件（所有 PNG 都由它生成）
+├── icon-192.png            # 安卓主屏幕图标
+├── icon-512.png            # 高清图标 / 启动画面
+├── icon-maskable-512.png   # 自适应图标（内容缩到 80%，四周留给系统裁切）
+├── apple-touch-icon.png    # iOS 主屏幕图标（Safari 不认 SVG，必须 PNG）
+├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源）
 └── manifest.webmanifest    # PWA 安装配置
 ```
 
@@ -222,9 +287,9 @@ const px = (r) => r * KX;
 
 ```bash
 node tools/verify-portrait.js   # 静态：立绘 36 用例图层校验
-node tools/verify-wiring.js     # 静态：脚本清单 / GL.* 提供者 / 宿主节点 / sw 版本
+node tools/verify-wiring.js     # 静态：脚本清单 / GL.* 提供者 / 宿主节点 / 资源存在性 / sw 版本
 node tools/verify-migrate.js    # 静态：数据迁移 v1→v2→v3（防历史记录丢失、防小字被改写）
-node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互测试 + 出 PNG
+node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互测试 + 手机视口 + 出 PNG
 ```
 
 - `verify-portrait.js`：无头 DOM 桩件跑一遍 `drawAll()`，检查坏值 `NaN/undefined`、
@@ -232,7 +297,12 @@ node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互�
 - `verify-wiring.js`：补前者的盲区 —— 脚本顺序必须为
   `storage → avatar → portrait → physiology → attributes → skills → life → app`，
   16 个宿主节点齐全、`#portrait-svg` 的 `viewBox` 与画布一致、无 Three.js CDN 残留、
-  **每个模块调用的 `GL.*` 都有提供者**、`sw.js` 的 `ASSETS` 完整且缓存版本 ≥ v9。
+  **每个模块调用的 `GL.*` 都有提供者**、缓存版本 ≥ v10。
+  v1.7.0 补上了三类**此前根本没被检查过**的东西（旧版收资源的正则只认
+  `js|css|html|svg|webmanifest`，`.png` 与 `.woff2` 全部漏检）：
+  **`ASSETS` 里引用的每个文件必须真实存在**（离线缺资源是静默失败 —— 不报错、不崩，
+  只是断网时那个文件没有）、**manifest 图标与 `index.html` 的本地引用必须存在**、
+  **不得再出现 Google Fonts 引用**。
 - `verify-migrate.js`：桩件跑 `storage.js`，断言迁移后**历史记录仍在**
   （`写作能力 xp 250` 要活着、旧名 `small talk闲聊能力` 要能配对、外貌四项要移入技能、
   旧项要淘汰、重复 load 要幂等）。v2→v3 那组还断言**小字被还原成原文**
@@ -248,11 +318,28 @@ node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互�
     **生命刻度那组会真的改一次视口宽度**（`Emulation.setDeviceMetricsOverride`）：断言列数随之变化、
     余数分摊后恰好占满可用宽度、整块高度不超上限，并**逐像素**确认网格画到了容器右缘
     （`getImageData` 数右缘 24px 竖条里的非透明像素，旧版这里是整片空白）、
-    十年节点白圈确实落在画布上（数白色像素 > 60）。共 66 项。
+    十年节点白圈确实落在画布上（数白色像素 > 60）。
+    **v1.7.0 新增手机视口那一组**：把视口切成 iPhone 尺寸（390×844 / dpr 3 / mobile），
+    断言侧栏确实变成 `position: fixed` 的底部标签栏、贴底悬浮、横向铺开、4 个页签触摸目标
+    ≥ 44px、主区底部留白够高、**无横向溢出**、输入框字号 ≥ 16px
+    （低于 16px 时 iOS 聚焦会自动放大整页）；并以**实际发出的资源请求**为证据，
+    断言字体只从本机加载、Google Fonts 请求数为 0。共 78 项。
     结尾还会打印**属性面板明细**（每组均值 + 每行「名称 数值」，负向标 `[-]`、双向标 `[~]`）——
     这不是断言，是给人眼的**地面真值**，缩略图上看错文案时以它为准。
   依赖 `ws`：`cd C:/Users/ZHANG/.workbuddy/binaries/node/workspace && npm i ws`，
   然后 `NODE_PATH=<该 node_modules> node tools/browser-check.js`。
+
+#### 两个配套脚本（v1.7.0）
+
+- **`tools/gen-icons.js`**：把 `icon.svg` 渲染成 4 个 PNG 图标（安卓 192/512、maskable 512、
+  iOS 180）。不装 sharp / cairosvg 之类依赖，借本机已有的 Chromium 无头渲染。
+  踩过两个坑：相对路径的 `--screenshot` **不落在当前目录**（按浏览器自己的工作目录算，必须传绝对路径）；
+  `--window-size` 有**最小尺寸钳制**，传 180 会得到一张只截到左上角的废图（文件很小、也不报错）。
+  现解法：窗口开成目标的 4 倍，再用 `--force-device-scale-factor=0.25` 缩回来。
+- **`tools/patch-index-mobile.js`**：改 `index.html` 请用它，别手工编辑。
+  这个文件会被外部编辑器**持续**注入 `data-page-node-id`（清干净后几秒内就回来），
+  手工 `Edit` 时常因这些多出来的属性而匹配失败。该脚本把「清除注入」与「应用改动」
+  放进同一次原子写入，且**幂等** —— 提交前重跑一遍当兜底。
 
 #### 为什么静态校验不够（两次事故复盘）
 
@@ -338,3 +425,4 @@ git stash && git checkout v1.1.0
 | v1.5.0 | 2026-09-18 | **属性与技能改为分组体系**：属性 3 大类 14 项（生理值 / 精神力 / 熵值），技能 5 大类 13 项（生理 / 语言 / 社交 / 外貌 / 其他），数据定义收敛到 `storage.js` 的 `ATTR_DEFS` / `SKILL_DEFS`。属性面板改三级视觉权重（大类标题 → 细刻度行 → 点击展开微调），14 项一屏装下且组可折叠。引入**极性语义**：负向指标（熵值 3 项 + 困倦度）红色反转、双向指标（社交度、稳定度）标理想区间，等级文案与初始值均随极性走，`GL.overallScore()` 对负向项取反。新增 `tools/verify-migrate.js`（24 项迁移断言，防历史丢失）。**修复交互失效回归**：各模块 `GL.hooks` 只注册了 `render` 未带 `bind()`，导致「页面能看、点不动」；`browser-check.js` 增加交互测试 + 极性文案方向断言（36 项）+ 属性面板明细输出。sw 缓存升 v7 |
 | v1.6.0 | 2026-09-21 | **小字按原文照录 + 前端可编辑**：属性/技能每项新增 `sub`（小字注解）与 `note`（说明）两字段，取值**逐字照录**用户两份原文（含全角括号、破折号、换行），不再由我改写精简；点开任一属性小项（或技能卡片的「✎ 注释」）即可在页面上直接编辑**名称 / 小字 / 说明**，编辑走 `GL.save()` + 就地刷新（`repaintRow` / `repaintCard`），**不触发 `GL.changed()`** 以免重渲染换掉输入框丢焦点；技能卡片新增注释栏。**修复生命刻度列宽**：旧实现量的是 `canvas.clientWidth`（默认 300px）导致网格只画出左边一小块，改为量容器宽度 + 整数列宽并把余数分摊到前 N 列，整行精确铺满；`window.resize{once}` 换成 `ResizeObserver`（带宽度去重防自激），`ctx.scale` 换 `setTransform`（防重画累乘）。数据迁移 v2→v3 还原被压缩的小字与丢失的说明（用户自建项不动）。sw 缓存升 v8 |
 | v1.6.1 | 2026-09-21 | **生命刻度改为「列数由宽度算」**：不再固定「52 列 × 预期寿命行」（那是一年一行的竖长条，宽屏下格子被拉到 22px、整块 1850px 高）。改为**格子固定大小（4–14px 一档，绝不拉伸）、列数由容器宽度算出、行数是结果**，总格子数恒等于总周数。挑格子的规则是「整块高度 ≤ 520px 时取最大边长」，所以窗口变宽 → 列变多行变少 → 整块变矮，一生始终一眼看全。宽度余数均匀分摊到各列间距，恰好占满容器。**标尺改为按周序号定位**（行不再等于一年，「每 10 行标一次」失效）：第 age×52 周那格 = age 岁生日所在格 → 画白色内圈，左侧数字按该格所在行对齐；每 52 周画 1px 年度刻度，颜色按区域反转（琥珀底暗线、暗底亮线）。新增网格下方「排布读数」与 `GL.lifeGrid` 布局真值。browser-check 增至 66 项，新增「真改视口宽度看列数是否重排」+ 逐像素确认画到右缘。sw 缓存升 v9 |
+| v1.7.0 | 2026-09-22 | **离线与手机端完整化**。① **字体自托管**：原先引 Google Fonts，国内不可达且 `<link rel=stylesheet>` 是渲染阻塞资源会拖白首屏；现将 Chakra Petch / JetBrains Mono 各 3 个字重（共 95KB woff2）放进 `fonts/`，CSS 用 @font-face 引用，页面做到**零跨域请求**，断网也不退化字形。② **补 PNG 图标**：iOS 不认 SVG 的 apple-touch-icon（会显示白块），新增 192 / 512 / maskable-512 / 180 四个尺寸，并写了 `tools/gen-icons.js` —— 借本机 Chromium 无头渲染，不引入 sharp 之类依赖。③ **手机端补齐**：底部标签栏加 `env(safe-area-inset-bottom)` 避开 iPhone 手势条；`100dvh` 替代 `100vh`（手机上 100vh 含地址栏会裁掉底部内容）；窄屏卡片标题栏改竖排（横排时展示字体标题与等宽说明挤成一团）；生命统计块锁两列（否则「约 49 年」的「年」字被挤到下一行）；输入框字号提到 16px（低于 16px 时 iOS 聚焦会自动放大整页 —— 且选择器必须带 `#main` 提权，否则被 `.tx-field input` 盖掉，实测就漏过一次）。④ **`sw.js`**：删掉 Three.js 时代遗留的 CDN 分支，改为只接管同源资源，ASSETS 补齐 6 个字体与 5 个图标（v10）。⑤ **校验增强**：verify-wiring 补上「ASSETS / manifest 图标 / index.html 引用必须真实存在」与「不得再有 Google Fonts」（旧正则只认 js|css|html|svg|webmanifest，png 与 woff2 全部漏检）；browser-check 66 → **78 项**，新增**手机视口**整组断言（真机 390×844 / dpr3 下测布局、触摸目标、横向溢出、输入框字号，并以实际资源请求证明字体来源） |

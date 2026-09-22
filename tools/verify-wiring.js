@@ -110,12 +110,50 @@ ok.push(`js/*.js 语法全部通过（${jsFiles.length} 个文件）`);
 
 /* ---------- 6. sw.js 资源清单 ---------- */
 const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
-const assets = [...sw.matchAll(/'([^']+\.(?:js|css|html|svg|webmanifest))'/g)].map((m) => m[1]);
+const assetsBlock = (sw.split('const ASSETS = [')[1] || '').split('];')[0];
+const assets = [...assetsBlock.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 for (const f of jsFiles) {
   if (!assets.includes(`js/${f}`)) problems.push(`sw.js ASSETS 漏了 js/${f}`);
 }
+
+/* ---------- 6b. ASSETS 引用的文件必须真实存在（v1.7.0 新增） ----------
+   离线缓存的失败是**静默**的：文件名打错既不报错也不崩，只是断网时那个资源没有。
+   字体与图标尤其隐蔽 —— 它们只在离线或已安装到主屏幕时才被用到，平时根本发现不了。
+   注意：旧版这里用『只匹配 js|css|html|svg|webmanifest』的正则来收资源，
+   于是 .png / .woff2 从来没被检查过，属于校验自身的盲区。 */
+const missingAssets = assets.filter((u) => u !== './' && !fs.existsSync(path.join(ROOT, u)));
+if (missingAssets.length) {
+  problems.push(`sw.js ASSETS 引用了不存在的文件：\n    ${missingAssets.join('\n    ')}`);
+} else {
+  ok.push(`sw.js ASSETS 的 ${assets.length} 项资源全部存在（含字体与图标）`);
+}
+
+/* ---------- 6c. manifest 图标与 index.html 的本地引用必须存在 ---------- */
+const mf = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
+const mfIcons = (mf.icons || []).map((i) => i.src).filter((u) => !/^https?:/.test(u));
+const missingIcons = mfIcons.filter((u) => !fs.existsSync(path.join(ROOT, u)));
+if (missingIcons.length) problems.push(`manifest 图标缺失：${missingIcons.join(', ')}`);
+else ok.push(`manifest 图标齐全（${mfIcons.length} 个，含 maskable）`);
+
+// iOS 的 apple-touch-icon 不支持 SVG，manifest 里必须同时给出 PNG
+if (!mfIcons.some((u) => /\.png$/.test(u))) {
+  problems.push('manifest 只声明了 SVG 图标 —— iOS 不认 SVG 图标，安卓支持面也不全，必须提供 PNG');
+}
+
+const htmlRefs = [...new Set([...html.matchAll(/(?:href|src)="((?!https?:|data:|#)[^"]+)"/g)].map((m) => m[1]))];
+const missingRefs = htmlRefs.filter((u) => !fs.existsSync(path.join(ROOT, u)));
+if (missingRefs.length) problems.push(`index.html 引用了不存在的本地资源：${missingRefs.join(', ')}`);
+else ok.push(`index.html 的 ${htmlRefs.length} 个本地资源引用全部存在`);
+
+/* ---------- 6d. 不得再依赖外部字体 CDN（国内可达性 + 首屏阻塞回归守卫） ---------- */
+if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
+  problems.push('index.html 又出现了 Google Fonts 引用 —— 国内不可达，且 <link rel="stylesheet"> 是渲染阻塞资源，会拖白首屏');
+} else {
+  ok.push('字体完全自托管，无外部字体依赖（离线可用）');
+}
+
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 9;   // v1.6.1：生命刻度改为「列数由宽度算」，必须 ≥ v9 才能冲掉旧缓存
+const MIN_SW_VER = 10;   // v1.7.0：字体本地化 + PNG 图标 + 安全区适配，必须 ≥ v10 才能冲掉旧缓存
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 
