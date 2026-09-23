@@ -77,10 +77,12 @@ function cdpGet(p) {
     r.on('error', rej); r.end();
   });
 }
+/* 找 ws 模块。优先靠 NODE_PATH（`require('ws')` 会走它），其次仓库本地 node_modules。
+   这里原本写死了一个机器上的绝对路径 —— 别人 clone 下来这一行必挂，
+   而且会把开发机的用户名一起公开在源码里。不要再写死绝对路径。 */
 function loadWS() {
-  for (const r of ['C:/Users/ZHANG/.workbuddy/binaries/node/workspace/node_modules', path.join(ROOT, 'node_modules')]) {
-    try { return require(path.join(r, 'ws')); } catch (e) {}
-  }
+  try { return require('ws'); } catch (e) {}
+  try { return require(path.join(ROOT, 'node_modules', 'ws')); } catch (e) {}
   return null;
 }
 
@@ -94,9 +96,9 @@ function check(ok, label, detail) {
   if (!EXE) { console.error('✗ 找不到 Edge / Chrome，无法做浏览器校验'); process.exit(1); }
   const WS = loadWS();
   if (!WS) {
-    console.error('✗ 缺少 ws 模块。请执行：');
-    console.error('  cd C:/Users/ZHANG/.workbuddy/binaries/node/workspace && npm i ws');
-    console.error('  并以 NODE_PATH 指向其 node_modules 运行本脚本');
+    console.error('✗ 缺少 ws 模块（第 4 层要靠 WebSocket 连 CDP）。任选其一：');
+    console.error('    npm i ws                                   # 装到仓库里');
+    console.error('    NODE_PATH=<含 node_modules 的目录> node tools/browser-check.js');
     process.exit(1);
   }
 

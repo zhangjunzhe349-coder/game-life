@@ -1,0 +1,2 @@
+GitHub Pages 会默认用 Jekyll 处理站点，而 Jekyll 会忽略下划线开头的文件/目录。
+本项目不需要 Jekyll 做任何转换（纯静态 HTML/CSS/JS），放这个空文件即可让它整份原样发布。
