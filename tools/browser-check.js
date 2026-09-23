@@ -26,6 +26,14 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+/* --dist：把整组断言跑在**部署产物** dist/ 上，而不是仓库根目录。
+   为什么需要：静态扫引用查不出两类问题 ——
+     ① 动态拼接加载的资源（构建时扫不到）没进 dist；
+     ② 某些文件被平台规则吃掉（如 GitHub Pages 的 Jekyll 会忽略下划线开头文件）。
+   只有真起一个 http 服务把 dist/ 跑一遍，才算证明了「部署上去能用」。
+   用法：node tools/build-dist.js && node tools/browser-check.js --dist */
+const DIST_MODE = process.argv.includes('--dist');
+const SERVE = DIST_MODE ? path.join(ROOT, 'dist') : ROOT;
 const SRV_PORT = 8127;
 const CDP_PORT = 9337;
 const WANT_SHOT = !process.argv.includes('--no-shot');
@@ -41,8 +49,8 @@ const MIME = {
 const srv = http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split('?')[0]);
   if (p === '/') p = '/index.html';
-  const fp = path.join(ROOT, p);
-  if (!fp.startsWith(ROOT)) { res.writeHead(403).end(); return; }
+  const fp = path.join(SERVE, p);
+  if (!fp.startsWith(SERVE)) { res.writeHead(403).end(); return; }
   fs.readFile(fp, (err, buf) => {
     if (err) { res.writeHead(404).end('404'); return; }
     // 禁缓存：确保读到磁盘最新文件，而不是 Service Worker 里的旧副本
@@ -90,6 +98,14 @@ function check(ok, label, detail) {
     console.error('  cd C:/Users/ZHANG/.workbuddy/binaries/node/workspace && npm i ws');
     console.error('  并以 NODE_PATH 指向其 node_modules 运行本脚本');
     process.exit(1);
+  }
+
+  if (DIST_MODE) {
+    if (!fs.existsSync(SERVE)) {
+      console.error('✗ 找不到 dist/。先跑：node tools/build-dist.js');
+      process.exit(1);
+    }
+    console.log(`  模式：部署产物校验（服务 ${path.relative(ROOT, SERVE)}/ 而不是仓库根）\n`);
   }
 
   await new Promise((r) => srv.listen(SRV_PORT, '127.0.0.1', r));

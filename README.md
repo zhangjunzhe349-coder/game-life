@@ -28,11 +28,53 @@ python -m http.server 8080
 **所以「手机 + 离线」的正解只有一个：把它放到 https 地址上，再从手机装到主屏幕。**
 （v1.6.1 及更早的 README 写的是「局域网访问后添加到主屏幕」，那是错的 —— 那样装出来的图标没有离线能力。）
 
-### 部署（任选其一，都免费且自动签发证书）
+### 部署：先构建 `dist/`，再上传
 
-- **Cloudflare Pages**：把 `game-life/` 目录拖进控制台即可，无需 Git
-- **GitHub Pages**：仓库推上去，Settings → Pages 选分支
-- **Vercel / Netlify**：同样支持拖拽部署
+```bash
+cd game-life
+node tools/build-dist.js            # 产出 dist/：纯净运行时资源，约 460 KB
+node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是跑在源码上）
+```
+
+`dist/` 与仓库是两份不同的东西：仓库里有 `tools/`（校验脚本 + 十几张调试截图）、`README.md`、`.git`，
+这些都不该出现在公网 URL 下。构建脚本会自检并**拒绝产出不合格的产物**：
+
+- 清单以 `sw.js` 的 `ASSETS` 为唯一真值，另补「只被 JS 字符串引用」的文件；
+- 每个 `href` / `src` / `url()` 引用都必须在产物里真实存在；
+- 零跨域引用（断网可用的前提）、不得混入开发产物；
+- **源 `index.html` 若带编辑器注入（`data-page-node-id`）直接拒绝构建** —— 那些标记会随部署公开泄露。
+
+> **为什么一定要跑 `--dist` 那一遍**：静态扫引用查不出两类问题。
+> 本项目的构建脚本第一版就漏拷了 `sw.js` —— Service Worker **不会把自己写进 `ASSETS`**（自己缓存自己没意义），
+> 于是「以 `ASSETS` 为唯一真值」的逻辑把它整份漏掉了。线上表现极具欺骗性：
+> 页面照常打开、数据照常保存，**只是静默失去离线能力**，而且 `app.js` 里是
+> `register('sw.js').catch(() => {})`，失败被吞掉，连控制台都不闹。
+> 这个 bug 就是被 `browser-check.js --dist` 报的 `404 fetching the script` 抓出来的。
+
+#### 平台怎么选（面向国内手机访问）
+
+| 平台 | 免费额度 | 自动 HTTPS | 国内访问 | 结论 |
+|---|---|---|---|---|
+| **腾讯云 EdgeOne Pages** | 50 GB/月 | 是 | 免备案即可用；备案后 50–90 ms | **首选** |
+| Cloudflare Pages | 无限带宽 | 是 | 联通晚高峰 800 ms+，时通时不通 | 备选 |
+| GitHub Pages | 100 GB/月 | 是 | 极慢 | 只适合放代码 |
+| Vercel / Netlify | 100 GB/月 | 是 | 大陆基本不可访问 / 较差 | 不推荐 |
+
+之所以不能「随便挑一个」：本项目全部价值都建立在**手机装到主屏幕、断网也能用**之上，
+而那个过程的第一步是能在手机上打开 https 地址。平台在国内不可达的话，前面所有离线适配都白做。
+
+#### 各平台操作
+
+- **EdgeOne Pages（推荐）**：控制台新建项目 → 上传 `dist/` 目录，或连 GitHub 仓库自动构建。
+- **Cloudflare Pages**：也可以把 `dist/` 直接拖进控制台（无需 Git）。用命令行则先 `npx wrangler login`，之后：
+  ```bash
+  npx wrangler pages deploy dist --project-name=game-life
+  ```
+  每次更新只需重跑构建 + 这一条命令。
+- **GitHub Pages**：仓库推上去 → Settings → Pages → `Deploy from a branch`。
+  - 想只发布产物：把 `dist/` 内容推到 `gh-pages` 分支（`dist/` 已在 `.gitignore`，不会误提交到 `main`）。
+  - 直接发布 `main` 根目录也能用，但会把 `tools/`（含调试截图）与源码一起公开。
+  - ⚠ Pages 默认会跑 Jekyll，它会忽略下划线开头的文件；产物里已放 `.nojekyll` 规避。
 
 ### 装到手机
 
@@ -89,6 +131,8 @@ game-life/
 ├── tools/verify-wiring.js  # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / 资源存在性 / sw 版本
 ├── tools/verify-migrate.js # 数据迁移校验：v1 → v2 → v3（41 项断言，防丢历史/防改写原文小字）
 ├── tools/browser-check.js  # 浏览器冒烟：桌面 + 手机视口 / 渲染断言 / 交互测试 / 面板明细 / 出 PNG
+│                            #   --dist 开关：整组断言改跑在部署产物 dist/ 上
+├── tools/build-dist.js     # 生成可部署的纯净 dist/（上线用；含产物自检与注入闸门）
 ├── tools/gen-icons.js      # 由 icon.svg 生成各尺寸 PNG 图标（含 maskable 与 iOS 尺寸）
 ├── tools/patch-index-mobile.js # 给 index.html 打 PWA 资源补丁（幂等，顺带清除编辑器注入属性）
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例

@@ -9,3 +9,6 @@ gamelife-backup-*.json
 tools/preview-portrait.*
 tools/pv-*.png
 tools/browser-shot-*.png
+
+# 部署产物（由 tools/build-dist.js 生成，是可重建的构建物，不入库）
+dist/
