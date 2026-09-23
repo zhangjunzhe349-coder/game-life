@@ -57,7 +57,7 @@ node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是�
 |---|---|---|---|---|
 | **腾讯云 EdgeOne Pages** | 50 GB/月 | 是 | 免备案即可用；备案后 50–90 ms | **首选** |
 | Cloudflare Pages | 无限带宽 | 是 | 联通晚高峰 800 ms+，时通时不通 | 备选 |
-| GitHub Pages | 100 GB/月 | 是 | 极慢 | 只适合放代码 |
+| GitHub Pages | 100 GB/月 | 是 | 极慢 | 门槛最低（公开仓库即可），国内体验差 |
 | Vercel / Netlify | 100 GB/月 | 是 | 大陆基本不可访问 / 较差 | 不推荐 |
 
 之所以不能「随便挑一个」：本项目全部价值都建立在**手机装到主屏幕、断网也能用**之上，
@@ -71,10 +71,21 @@ node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是�
   npx wrangler pages deploy dist --project-name=game-life
   ```
   每次更新只需重跑构建 + 这一条命令。
-- **GitHub Pages**：仓库推上去 → Settings → Pages → `Deploy from a branch`。
-  - 想只发布产物：把 `dist/` 内容推到 `gh-pages` 分支（`dist/` 已在 `.gitignore`，不会误提交到 `main`）。
-  - 直接发布 `main` 根目录也能用，但会把 `tools/`（含调试截图）与源码一起公开。
-  - ⚠ Pages 默认会跑 Jekyll，它会忽略下划线开头的文件；产物里已放 `.nojekyll` 规避。
+- **GitHub Pages**：**仓库根目录本身就是站点**（`index.html` 就在根上），不需要额外构建步骤：
+  ```bash
+  gh repo create game-life --public --source=. --remote=origin --push
+  git push origin --tags     # gh 的 --push 不带 tag，版本 tags 要另推
+  gh api -X POST "repos/{owner}/{repo}/pages" \
+    -f 'source[branch]=main' -f 'source[path]=/'
+  ```
+  之后地址是 `https://<用户名>.github.io/game-life/`。
+  - ⚠ 免费账号的 Pages **只对公开仓库开放**（私有仓库需 Pro）。仓库一公开，源码与 README 都会公开 ——
+    所以上线前要扫一遍有没有写死的本地绝对路径、真名、密钥。
+  - ⚠ 免费版 Pages 是**纯静态**、无服务端逻辑；本项目正好是纯前端，契合。
+  - ⚠ 部署在子路径下时，`manifest.webmanifest` 的 `start_url`/`scope` 与 Service Worker 作用域
+    都必须是**相对路径**才不失效（本仓已是 `"./index.html"` / `"./"`，已确认可用）。
+  - ⚠ Pages 默认会跑 Jekyll，它会忽略下划线开头的文件；根目录已放 `.nojekyll` 规避。
+  - 想只发布产物而不是整个仓库：把 `dist/` 内容推到 `gh-pages` 分支。
 
 ### 装到手机
 
