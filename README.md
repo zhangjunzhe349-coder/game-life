@@ -57,7 +57,7 @@ node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是�
 |---|---|---|---|---|
 | **腾讯云 EdgeOne Pages** | 50 GB/月 | 是 | 免备案即可用；备案后 50–90 ms | **首选** |
 | Cloudflare Pages | 无限带宽 | 是 | 联通晚高峰 800 ms+，时通时不通 | 备选 |
-| GitHub Pages | 100 GB/月 | 是 | 极慢 | 门槛最低（公开仓库即可），国内体验差 |
+| GitHub Pages | 100 GB/月 | 是 | 极慢 | **本项目当前采用**（地址见下），门槛最低但国内体验差 |
 | Vercel / Netlify | 100 GB/月 | 是 | 大陆基本不可访问 / 较差 | 不推荐 |
 
 之所以不能「随便挑一个」：本项目全部价值都建立在**手机装到主屏幕、断网也能用**之上，
@@ -79,6 +79,9 @@ node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是�
     -f 'source[branch]=main' -f 'source[path]=/'
   ```
   之后地址是 `https://<用户名>.github.io/game-life/`。
+  - ✅ **本项目已上线（2026-09-23）：<https://zhangjunzhe349-coder.github.io/game-life/>**
+    仓库：<https://github.com/zhangjunzhe349-coder/game-life>（`main` 分支即站点根目录，推上去约 1 分钟自动发布）
+  - ⚠ 国内直连很慢，手机上最好先开代理再「添加到主屏幕」；装好后断网可用（Service Worker 已提供离线能力）。
   - ⚠ 免费账号的 Pages **只对公开仓库开放**（私有仓库需 Pro）。仓库一公开，源码与 README 都会公开 ——
     所以上线前要扫一遍有没有写死的本地绝对路径、真名、密钥。
   - ⚠ 免费版 Pages 是**纯静态**、无服务端逻辑；本项目正好是纯前端，契合。
