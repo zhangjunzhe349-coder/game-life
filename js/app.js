@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.7.0';
+  const APP_VERSION = '1.7.1';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 工具：今日饮水 ---------- */

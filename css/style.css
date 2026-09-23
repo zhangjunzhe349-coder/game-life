@@ -865,7 +865,9 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
   }
   .tab.active::after { display: none; }
   /* 底部留白 = 标签栏高度 + 安全区，否则最后一屏内容会被悬浮栏压住 */
-  #main { padding: var(--s4) calc(var(--s4) + var(--sa-r)) calc(112px + var(--sa-b)) calc(var(--s4) + var(--sa-l)); }
+  /* 顶部同样让开安全区：iOS 的 black-translucent 状态栏是浮在页面之上的，
+     不让开的话页头会被时间/电量压住（安卓为 0，无副作用） */
+  #main { padding: calc(var(--s4) + var(--sa-t)) calc(var(--s4) + var(--sa-r)) calc(112px + var(--sa-b)) calc(var(--s4) + var(--sa-l)); }
   .hud { grid-template-columns: 1fr; gap: var(--s4); }
   .stage { min-height: 380px; }
   .hud-bar { padding: var(--s4); gap: var(--s3); }
@@ -892,6 +894,16 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 @media (max-width: 400px) {
   .hud-title { font-size: var(--fs-lg); }
   .lv-badge { width: 54px; height: 54px; }
+}
+
+/* ============ 全屏启动（安卓 WebAPK）============
+   manifest 的 display 为 fullscreen，系统状态栏会被隐藏：页面直接顶到屏幕
+   最上沿，且此时 env(safe-area-inset-top) 为 0（没有东西挡着了，系统不再让位）。
+   光靠 --sa-t 会让页头贴着屏幕边缘，这里补一条固定留白。
+   standalone（iOS）与桌面浏览器标签页都不匹配此查询，不受影响。 */
+@media (display-mode: fullscreen) {
+  #main { padding-top: calc(var(--s4) + var(--sa-t) + 10px); }
+  /* 全屏下底部手势条仍然存在，底部留白沿用 --sa-b 即可 */
 }
 
 /* ============ 降级动效 ============ */

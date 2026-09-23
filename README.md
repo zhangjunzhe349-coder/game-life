@@ -99,6 +99,24 @@ node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是�
 > iOS 必须用 **Safari** 添加（Chrome for iOS 走的是同一内核但入口不完整）。
 > 图标已经是 PNG（`apple-touch-icon.png` 180×180）—— iOS 不认 SVG，用 SVG 会显示成白块。
 
+### 全屏程度：安卓连状态栏一起去掉（v1.7.1）
+
+manifest 的 `display` 为 `fullscreen`、`display_override` 为 `["fullscreen", "standalone"]`：
+
+- **浏览器标签页里打开**：当然有地址栏 —— 这不是配置问题，是没装。
+- **装到主屏幕后**：安卓连顶部状态栏（时间/电量）一起去掉，真全屏；
+  **iOS 系统不支持 fullscreen，按规范回落到 standalone**（状态栏还在，这点绕不过去）。
+- 全屏时 `env(safe-area-inset-top)` 会归零（没有东西挡着了），所以 CSS 里有一条
+  `@media (display-mode: fullscreen)` 的固定留白兜底，否则页头会贴到屏幕最上沿。
+
+> ⚠ **两个改动必须成对**：浏览器**优先读 `display_override`**，只把 `display` 改成 fullscreen
+> 在安卓上不会生效；而 `display_override` 里必须留着 `standalone`，否则 iOS 没有可用项会退回浏览器模式。
+> `tools/verify-wiring.js` 已加断言守住这一条。
+>
+> ⚠ **已经添加到主屏幕的话，需要等 Chrome 后台更新 WebAPK**（通常几小时到一天，打开一次应用会催一下）。
+> 若一天后仍非全屏：**先在设置页导出备份** → 删除主屏幕图标 → 重新「添加到主屏幕」 → 导入备份。
+> **卸载 WebAPK 会连同该应用的 `localStorage` 一起清掉**，绝不能省掉导出这一步。
+
 ### 数据归属：localStorage 按 origin 隔离
 
 这是部署前必须知道的一件事 —— 数据绑在**协议 + 域名 + 端口**上：
@@ -115,7 +133,7 @@ node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是�
 ### 自检离线是否真的生效
 
 1. DevTools → Application → Service Workers：确认状态是 `activated`
-2. Application → Cache Storage → `gamelife-v10`：应有 **23 项**（含 6 个字体、5 个图标）
+2. Application → Cache Storage → `gamelife-v11`：应有 **23 项**（含 6 个字体、5 个图标）
 3. Network 面板勾上 **Offline** 后刷新：页面应完整呈现，且 logo 等展示字的字形**不退化**
    （若字形变了，说明字体没进缓存）
 
@@ -157,7 +175,7 @@ game-life/
 ├── icon-512.png            # 高清图标 / 启动画面
 ├── icon-maskable-512.png   # 自适应图标（内容缩到 80%，四周留给系统裁切）
 ├── apple-touch-icon.png    # iOS 主屏幕图标（Safari 不认 SVG，必须 PNG）
-├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源）
+├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v11）
 └── manifest.webmanifest    # PWA 安装配置
 ```
 
@@ -484,3 +502,4 @@ git stash && git checkout v1.1.0
 | v1.6.0 | 2026-09-21 | **小字按原文照录 + 前端可编辑**：属性/技能每项新增 `sub`（小字注解）与 `note`（说明）两字段，取值**逐字照录**用户两份原文（含全角括号、破折号、换行），不再由我改写精简；点开任一属性小项（或技能卡片的「✎ 注释」）即可在页面上直接编辑**名称 / 小字 / 说明**，编辑走 `GL.save()` + 就地刷新（`repaintRow` / `repaintCard`），**不触发 `GL.changed()`** 以免重渲染换掉输入框丢焦点；技能卡片新增注释栏。**修复生命刻度列宽**：旧实现量的是 `canvas.clientWidth`（默认 300px）导致网格只画出左边一小块，改为量容器宽度 + 整数列宽并把余数分摊到前 N 列，整行精确铺满；`window.resize{once}` 换成 `ResizeObserver`（带宽度去重防自激），`ctx.scale` 换 `setTransform`（防重画累乘）。数据迁移 v2→v3 还原被压缩的小字与丢失的说明（用户自建项不动）。sw 缓存升 v8 |
 | v1.6.1 | 2026-09-21 | **生命刻度改为「列数由宽度算」**：不再固定「52 列 × 预期寿命行」（那是一年一行的竖长条，宽屏下格子被拉到 22px、整块 1850px 高）。改为**格子固定大小（4–14px 一档，绝不拉伸）、列数由容器宽度算出、行数是结果**，总格子数恒等于总周数。挑格子的规则是「整块高度 ≤ 520px 时取最大边长」，所以窗口变宽 → 列变多行变少 → 整块变矮，一生始终一眼看全。宽度余数均匀分摊到各列间距，恰好占满容器。**标尺改为按周序号定位**（行不再等于一年，「每 10 行标一次」失效）：第 age×52 周那格 = age 岁生日所在格 → 画白色内圈，左侧数字按该格所在行对齐；每 52 周画 1px 年度刻度，颜色按区域反转（琥珀底暗线、暗底亮线）。新增网格下方「排布读数」与 `GL.lifeGrid` 布局真值。browser-check 增至 66 项，新增「真改视口宽度看列数是否重排」+ 逐像素确认画到右缘。sw 缓存升 v9 |
 | v1.7.0 | 2026-09-22 | **离线与手机端完整化**。① **字体自托管**：原先引 Google Fonts，国内不可达且 `<link rel=stylesheet>` 是渲染阻塞资源会拖白首屏；现将 Chakra Petch / JetBrains Mono 各 3 个字重（共 95KB woff2）放进 `fonts/`，CSS 用 @font-face 引用，页面做到**零跨域请求**，断网也不退化字形。② **补 PNG 图标**：iOS 不认 SVG 的 apple-touch-icon（会显示白块），新增 192 / 512 / maskable-512 / 180 四个尺寸，并写了 `tools/gen-icons.js` —— 借本机 Chromium 无头渲染，不引入 sharp 之类依赖。③ **手机端补齐**：底部标签栏加 `env(safe-area-inset-bottom)` 避开 iPhone 手势条；`100dvh` 替代 `100vh`（手机上 100vh 含地址栏会裁掉底部内容）；窄屏卡片标题栏改竖排（横排时展示字体标题与等宽说明挤成一团）；生命统计块锁两列（否则「约 49 年」的「年」字被挤到下一行）；输入框字号提到 16px（低于 16px 时 iOS 聚焦会自动放大整页 —— 且选择器必须带 `#main` 提权，否则被 `.tx-field input` 盖掉，实测就漏过一次）。④ **`sw.js`**：删掉 Three.js 时代遗留的 CDN 分支，改为只接管同源资源，ASSETS 补齐 6 个字体与 5 个图标（v10）。⑤ **校验增强**：verify-wiring 补上「ASSETS / manifest 图标 / index.html 引用必须真实存在」与「不得再有 Google Fonts」（旧正则只认 js|css|html|svg|webmanifest，png 与 woff2 全部漏检）；browser-check 66 → **78 项**，新增**手机视口**整组断言（真机 390×844 / dpr3 下测布局、触摸目标、横向溢出、输入框字号，并以实际资源请求证明字体来源） |
+| v1.7.1 | 2026-09-23 | **安卓全屏启动**：`display` 由 `standalone` 改为 `fullscreen`，`display_override` 由 `["standalone","minimal-ui"]` 改为 `["fullscreen","standalone"]`（⚠ 浏览器**优先读 `display_override`**，只改 `display` 在安卓上不生效；列表里保留 `standalone` 是 iOS 的规范回落项）。全屏后系统状态栏消失、`env(safe-area-inset-top)` 归零，故新增 `@media (display-mode: fullscreen)` 的页头固定留白兜底。**顺带修掉一个潜伏 bug**：`--sa-t` 变量定义了却全仓无人引用 —— iOS 的 `black-translucent` 状态栏是浮在页面之上的，页头一直被时间/电量压着；现补进 `#main` 顶部内边距。校验：verify-wiring 增 3 条断言（`display` 与 `display_override` 必须成对为 fullscreen / 必须有 fullscreen 留白兜底 / `--sa-t` 必须被消费），browser-check 78 → **82 项**（不读源码：从部署产物的 CSSOM 取该规则，再用 CSSOM 临时解除媒体条件量**真实层叠结果** `16px → 26px`，证明它没被上面的 `padding` 简写盖掉）。sw 缓存升 v11 |

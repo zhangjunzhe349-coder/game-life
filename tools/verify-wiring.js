@@ -145,7 +145,35 @@ const missingRefs = htmlRefs.filter((u) => !fs.existsSync(path.join(ROOT, u)));
 if (missingRefs.length) problems.push(`index.html 引用了不存在的本地资源：${missingRefs.join(', ')}`);
 else ok.push(`index.html 的 ${htmlRefs.length} 个本地资源引用全部存在`);
 
-/* ---------- 6d. 不得再依赖外部字体 CDN（国内可达性 + 首屏阻塞回归守卫） ---------- */
+/* ---------- 6d. 全屏启动：display 与 display_override 必须一致 ---------- */
+const css = fs.readFileSync(path.join(ROOT, 'css/style.css'), 'utf8');
+const ov = mf.display_override || [];
+if (mf.display === 'fullscreen' && ov[0] === 'fullscreen' && ov.includes('standalone')) {
+  ok.push('全屏启动配置就位（display: fullscreen + display_override 回落 standalone）');
+} else {
+  problems.push(
+    `全屏启动配置不完整（display=${mf.display}，display_override=[${ov.join(', ')}]）—— ` +
+    '必须两者同时为首选 fullscreen：**浏览器优先读 display_override**，只改 display 在安卓上不生效；' +
+    '列表中保留 standalone 是因为 iOS 不支持 fullscreen，需按规范回落',
+  );
+}
+if (!/display-mode:\s*fullscreen/.test(css)) {
+  problems.push(
+    'css 缺少 @media (display-mode: fullscreen) 的顶部留白兜底 —— ' +
+    '全屏时系统状态栏被隐藏，env(safe-area-inset-top) 归零，页头会直接贴到屏幕最上沿',
+  );
+} else if (/padding-top:[^;]*var\(--sa-t\)[^;]*\+[^;]*px|padding-top:[^;]*px[^;]*\+[^;]*var\(--sa-t\)/.test(css.match(/@media \(display-mode: fullscreen\)[\s\S]*?\n\}/)?.[0] || '')) {
+  ok.push('全屏模式下页头留白兜底就位（--sa-t 归零时仍有固定留白）');
+} else {
+  problems.push('全屏媒体查询里没看到「固定留白 + --sa-t」的组合，状态栏隐藏后页头可能贴边');
+}
+
+// --sa-t 定义了就必须有人用；只定义不用 = 状态栏浮层会压住页头（iOS black-translucent 就是这么丢的）
+const saTUsed = /var\(--sa-t\)/.test(css);
+if (saTUsed) ok.push('顶部安全区变量 --sa-t 已被消费（iOS 半透明状态栏不会压住页头）');
+else problems.push('css 定义了 --sa-t 却没有任何规则使用它 —— iOS 的 black-translucent 状态栏会浮在页面上压住页头');
+
+/* ---------- 6e. 不得再依赖外部字体 CDN（国内可达性 + 首屏阻塞回归守卫） ---------- */
 if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
   problems.push('index.html 又出现了 Google Fonts 引用 —— 国内不可达，且 <link rel="stylesheet"> 是渲染阻塞资源，会拖白首屏');
 } else {
@@ -153,7 +181,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 10;   // v1.7.0：字体本地化 + PNG 图标 + 安全区适配，必须 ≥ v10 才能冲掉旧缓存
+const MIN_SW_VER = 11;   // v1.7.1：全屏启动（display: fullscreen）+ 页头安全区，资源有变必须 ≥ v11
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

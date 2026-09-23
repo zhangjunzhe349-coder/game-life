@@ -682,6 +682,76 @@ function check(ok, label, detail) {
     check(false, '手机视口：测量失败', mob && mob.__err ? String(mob.__err) : '未知');
   }
 
+  /* ---------- 全屏启动（v1.7.1）：manifest 的 display:fullscreen 生效后 ----------
+     系统状态栏被隐藏 → env(safe-area-inset-top) 归零 → 页头会直接贴到屏幕最上沿。
+     兜底 CSS 若只「写在源文件里」从没被观测过，就属于纸面配置。两层验证：
+       ① CSSOM（跑在部署产物上）：确实存在一条 display-mode:fullscreen 规则，
+          且本条规则的 padding-top 里同时有 --sa-t 与固定留白 —— 能抓 404 / 压缩走样 / 写错。
+       ② 实测量：用 CDP 伪造 display-mode 媒体特性，看 computed padding-top 是否真的变大。
+          部分 Chrome 版本不支持伪造该特性，此时自动降级为只跑第 ① 层（打印出来，不当失败）。 */
+  const fsCss = await ev(`(() => {
+    let cond = null, rulePad = null;
+    for (const sh of document.styleSheets) {
+      let rules; try { rules = sh.cssRules; } catch (e) { continue; }
+      for (const r of rules) {
+        if (r.type === CSSRule.MEDIA_RULE && /display-mode:\\s*fullscreen/.test(r.conditionText || '')) {
+          cond = r.conditionText;
+          for (const ir of r.cssRules) {
+            if (ir.selectorText && ir.selectorText.indexOf('#main') >= 0) rulePad = ir.style.paddingTop || '';
+          }
+        }
+      }
+    }
+    const m = document.getElementById('main');
+    return { cond, rulePad, basePad: m ? Math.round(parseFloat(getComputedStyle(m).paddingTop)) : null };
+  })()`);
+
+  if (fsCss && !fsCss.__err) {
+    check(!!fsCss.cond,
+      '全屏：部署产物的 CSS 里有 display-mode:fullscreen 规则（不是只写在源文件里）',
+      fsCss.cond || '未找到');
+    check(!!fsCss.rulePad && /var\(--sa-t\)/.test(fsCss.rulePad) && /px/.test(fsCss.rulePad),
+      '全屏：该规则同时含 --sa-t 与固定留白（状态栏消失后仍不贴边）',
+      fsCss.rulePad || '未取到 padding-top');
+
+    /* 第 ② 层：让「产物里那条规则」真的参与一次层叠。
+       实测本机 Chrome 不支持伪造 display-mode 媒体特性（matchMedia 仍为 false），
+       所以不走 CDP 伪造，改为用 CSSOM 把该规则的媒体条件临时改成 all 再量 computed 值。
+       这测的是**同一条规则 + 同一份层叠上下文**：手机媒体查询里那条 #main 的
+       padding 简写（同为 #main，特异性相同）会不会把它盖掉 —— 光读源码看不出来。 */
+    const fsForce = await ev(`(() => {
+      let rule = null;
+      for (const sh of document.styleSheets) {
+        let rr; try { rr = sh.cssRules; } catch (e) { continue; }
+        for (const r of rr) {
+          if (r.type === CSSRule.MEDIA_RULE && /display-mode:\\s*fullscreen/.test(r.conditionText || '')) rule = r;
+        }
+      }
+      const m = document.getElementById('main');
+      if (!rule || !m) return { err: '未找到规则或 #main' };
+      const before = Math.round(parseFloat(getComputedStyle(m).paddingTop));
+      const orig = rule.media.mediaText;
+      rule.media.mediaText = 'all';
+      const after = Math.round(parseFloat(getComputedStyle(m).paddingTop));
+      rule.media.mediaText = orig;
+      const restored = Math.round(parseFloat(getComputedStyle(m).paddingTop));
+      return { before, after, restored, orig };
+    })()`);
+
+    if (fsForce && !fsForce.err) {
+      check(fsForce.after >= fsForce.before + 8,
+        '全屏：该规则真的加高了页头留白，没被上面的 padding 简写盖掉（实测层叠结果）',
+        `常态 ${fsForce.before}px → 命中后 ${fsForce.after}px`);
+      check(fsForce.restored === fsForce.before,
+        '全屏：条件解除时留白自动还原（不会在非全屏下多留白）',
+        `还原 ${fsForce.restored}px · 条件「${fsForce.orig}」`);
+    } else {
+      check(false, '全屏：层叠实测失败', (fsForce && fsForce.err) || '未知');
+    }
+  } else {
+    check(false, '全屏：CSSOM 读取失败', fsCss && fsCss.__err ? String(fsCss.__err) : '未知');
+  }
+
   /* 手机尺寸截图：三个主页面各出一张，直观看窄屏布局。
      切页要留足时间 —— 生命页的 canvas 是切过去那一刻才绘制的。 */
   if (WANT_SHOT) {
