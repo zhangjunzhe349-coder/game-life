@@ -14,6 +14,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const zlib = require('zlib');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
@@ -89,7 +90,7 @@ function findBrowser() {
 
 /* 用无头浏览器把 SVG 渲染成 size×size 的 PNG。
    ------------------------------------------------------------
-   两个坑，都踩过：
+   三个坑，都踩过：
    ① 相对路径的 --screenshot 不落在当前目录，而是浏览器自己的工作目录 —— 必须传绝对路径。
    ② --window-size 有**最小尺寸钳制**（远小于 500px 会被顶到最小值），
       于是「--window-size=48,48」实际渲染的是 ~500px 视口，截图只取左上角一小块，
@@ -97,6 +98,11 @@ function findBrowser() {
    解法：窗口一律开到 800px 以上（稳过钳制），再用 --force-device-scale-factor 缩回来。
    输出像素 = CSS 窗口尺寸 × DSF，所以 DSF 取 size/win，而不是写死的 0.25
    —— 安卓有 48px 这种小图，4 倍窗口也才 192px，仍会被钳制。
+   ③ **无头浏览器默认把页面画在白底上**：不加 --default-background-color 时，
+      截图是不带 alpha 通道的 RGB 白底图（colorType=2）。
+      对满铺的图标看不出来，但「自适应图标前景层」本来就只有一支不透明闪电、
+      其余该透明 —— 白底一截进去就成了一张不透明白方图，
+      盖在背景层上 = 整个图标变成纯白（v1.7.4 实机事故，用户反馈「图标从紫色变成了白色」）。
    --virtual-time-budget 也必须给：否则可能在 SVG 绘制完成前就截图，得到空白图。 */
 function shoot(srcSvg, out, size) {
   const win = Math.max(800, size * 2);
@@ -105,6 +111,7 @@ function shoot(srcSvg, out, size) {
     '--headless',
     '--disable-gpu',
     '--hide-scrollbars',
+    '--default-background-color=00000000',   // ← 见上面 ③，缺了它前景层必白
     '--force-device-scale-factor=' + dsf,
     '--virtual-time-budget=2000',
     '--window-size=' + win + ',' + win,
@@ -113,11 +120,82 @@ function shoot(srcSvg, out, size) {
   ], { stdio: 'ignore' });
 }
 
-/* 读 PNG 的 IHDR 拿真实宽高，确认截图尺寸没错（不要凭信任） */
-function pngSize(file) {
+/* ---------- PNG 解码：只为「拿真实像素来断言」 ----------
+   为什么非要读到像素不可：上面 ③ 那个 bug 从文件尺寸、脚本退出码、
+   乃至肉眼看小图都发现不了 —— 白底 PNG 与透明 PNG 一样是「生成成功」。
+   唯一能一眼判死的就是 alpha 通道本身。
+   只支持 depth=8 的无隔行 PNG（Chrome 截图就是），够用。 */
+function decodePng(file) {
   const b = fs.readFileSync(file);
   if (b.slice(1, 4).toString() !== 'PNG') throw new Error(file + ' 不是 PNG');
-  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), bytes: b.length };
+  let pos = 8, ihdr = null;
+  const idat = [];
+  while (pos + 8 <= b.length) {
+    const len = b.readUInt32BE(pos);
+    const type = b.toString('ascii', pos + 4, pos + 8);
+    const data = b.subarray(pos + 8, pos + 8 + len);
+    if (type === 'IHDR') {
+      ihdr = { w: data.readUInt32BE(0), h: data.readUInt32BE(4), depth: data[8], color: data[9], interlace: data[12] };
+    } else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+    pos += 12 + len;
+  }
+  if (!ihdr) throw new Error(file + ' 缺 IHDR');
+  if (ihdr.depth !== 8 || ihdr.interlace !== 0) throw new Error(file + ` 不支持 depth=${ihdr.depth} interlace=${ihdr.interlace}`);
+  const BPP = { 0: 1, 2: 3, 4: 2, 6: 4 }[ihdr.color];
+  if (!BPP) throw new Error(file + ` 不支持的 colorType=${ihdr.color}`);
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = ihdr.w * BPP;
+  const rows = [];
+  let p = 0, prev = Buffer.alloc(stride);
+  for (let y = 0; y < ihdr.h; y++) {
+    const f = raw[p++];
+    const line = Buffer.from(raw.subarray(p, p + stride)); p += stride;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= BPP ? line[i - BPP] : 0;
+      const u = prev[i];
+      const c = i >= BPP ? prev[i - BPP] : 0;
+      let add = 0;
+      if (f === 1) add = a;
+      else if (f === 2) add = u;
+      else if (f === 3) add = (a + u) >> 1;
+      else if (f === 4) {
+        const q = a + u - c, pa = Math.abs(q - a), pb = Math.abs(q - u), pc = Math.abs(q - c);
+        add = (pa <= pb && pa <= pc) ? a : (pb <= pc ? u : c);
+      }
+      line[i] = (line[i] + add) & 255;
+    }
+    rows.push(line); prev = line;
+  }
+  return {
+    w: ihdr.w, h: ihdr.h, hasAlpha: ihdr.color === 6 || ihdr.color === 4,
+    /* 返回 [r,g,b,a]（无 alpha 通道的图一律视为不透明） */
+    at(x, y) {
+      const o = rows[y].subarray(x * BPP, (x + 1) * BPP);
+      return BPP === 4 ? [o[0], o[1], o[2], o[3]] : [o[0], o[1], o[2], 255];
+    },
+  };
+}
+
+/* ---------- 断言：图标的透明/不透明必须是「设计上要的那样」 ----------
+   corners-clear：四角透明、中心不透明（圆角 / 圆形 / 自适应前景层）
+   opaque       ：四角与中心都不透明（满铺底）
+   ⚠ 这条断言就是 v1.7.4 事故的守门人。少了它，白底前景层会一路静默通过。 */
+function verifyAlpha(file, expect) {
+  const png = decodePng(file);
+  const pts = [[1, 1], [png.w - 2, 1], [1, png.h - 2], [png.w - 2, png.h - 2]];
+  const corners = pts.map(([x, y]) => png.at(x, y));
+  const mid = png.at(png.w >> 1, png.h >> 1);
+  const cornerA = Math.max(...corners.map((c) => c[3]));
+  if (expect === 'corners-clear') {
+    if (!png.hasAlpha) return `没有 alpha 通道（被截成了白底图）`;
+    if (cornerA !== 0) return `四角不透明（alpha=${cornerA}），应为透明 —— 又被截进白底了？`;
+    if (mid[3] !== 255) return `中心透明（alpha=${mid[3]}），应为实心内容`;
+  } else {
+    if (cornerA !== 255) return `四角 alpha=${cornerA}，应为 255 不透明`;
+    if (mid[3] !== 255) return `中心 alpha=${mid[3]}，应为 255 不透明`;
+  }
+  return null;
 }
 
 const SRC_ROUNDED = writeSvg('rounded.svg', SVG_ROUNDED);
@@ -131,12 +209,12 @@ fs.writeFileSync(path.join(ROOT, 'icon.svg'), SVG_ROUNDED, 'utf8');
 
 /* ---------- Web 端 4 张 ---------- */
 const WEB_JOBS = [
-  ['icon-192.png', 192, SRC_ROUNDED, 'purpose: any'],
-  ['icon-512.png', 512, SRC_ROUNDED, 'purpose: any'],
-  ['icon-maskable-512.png', 512, SRC_FULL, 'purpose: maskable'],
+  ['icon-192.png', 192, SRC_ROUNDED, 'purpose: any', 'corners-clear'],
+  ['icon-512.png', 512, SRC_ROUNDED, 'purpose: any', 'corners-clear'],
+  ['icon-maskable-512.png', 512, SRC_FULL, 'purpose: maskable', 'opaque'],
   // iOS 会给图标套自己的超椭圆遮罩，所以必须交满铺版：
   // 自带圆角会「圆角套圆角」，外圈还容易露出异色边
-  ['apple-touch-icon.png', 180, SRC_FULL, 'iOS 主屏幕图标'],
+  ['apple-touch-icon.png', 180, SRC_FULL, 'iOS 主屏幕图标', 'opaque'],
 ];
 
 /* ---------- 安卓端：5 个密度 × 3 张 ----------
@@ -145,23 +223,25 @@ const WEB_JOBS = [
 const DENSITIES = [['mdpi', 1], ['hdpi', 1.5], ['xhdpi', 2], ['xxhdpi', 3], ['xxxhdpi', 4]];
 const ANDROID_JOBS = [];
 for (const [d, k] of DENSITIES) {
-  ANDROID_JOBS.push([`mipmap-${d}/ic_launcher.png`, 48 * k, SRC_FULL, '启动器图标（Android 7-）']);
-  ANDROID_JOBS.push([`mipmap-${d}/ic_launcher_round.png`, 48 * k, SRC_CIRCLE, '圆形启动器图标']);
-  ANDROID_JOBS.push([`mipmap-${d}/ic_launcher_foreground.png`, 108 * k, SRC_FOREGROUND, '自适应图标前景层']);
+  ANDROID_JOBS.push([`mipmap-${d}/ic_launcher.png`, 48 * k, SRC_FULL, '启动器图标（Android 7-）', 'opaque']);
+  ANDROID_JOBS.push([`mipmap-${d}/ic_launcher_round.png`, 48 * k, SRC_CIRCLE, '圆形启动器图标', 'corners-clear']);
+  ANDROID_JOBS.push([`mipmap-${d}/ic_launcher_foreground.png`, 108 * k, SRC_FOREGROUND, '自适应图标前景层', 'corners-clear']);
 }
 
 let fail = 0;
 function run(jobs, baseDir, label) {
   console.log(`--- ${label} ---`);
-  for (const [name, size, src, why] of jobs) {
+  for (const [name, size, src, why, alpha] of jobs) {
     const out = path.join(baseDir, name);
     try {
       fs.mkdirSync(path.dirname(out), { recursive: true });
       shoot(src, out, size);
-      const got = pngSize(out);
-      const ok = got.w === size && got.h === size;
-      if (!ok) fail++;
-      console.log(`${ok ? '✓' : '✗'} ${name.padEnd(42)} ${got.w}×${got.h}  ${(got.bytes / 1024).toFixed(1)}KB  (${why})`);
+      const png = decodePng(out);
+      const bad = (png.w !== size || png.h !== size)
+        ? `尺寸 ${png.w}×${png.h}，应为 ${size}×${size}`
+        : verifyAlpha(out, alpha);
+      if (bad) { fail++; console.log(`✗ ${name.padEnd(42)} ${bad}`); }
+      else console.log(`✓ ${name.padEnd(42)} ${png.w}×${png.h}  alpha=${alpha === 'opaque' ? '全不透明' : '角落透明'}  (${why})`);
     } catch (e) {
       fail++;
       console.log(`✗ ${name.padEnd(42)} 失败：${e.message}`);
@@ -216,5 +296,5 @@ for (const [rel, content] of Object.entries(XML)) {
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });
-console.log(fail ? `\n${fail} 张图标生成失败` : '\n全部图标生成成功');
+console.log(fail ? `\n${fail} 张图标生成失败` : '\n全部图标生成成功（含 alpha 通道断言）');
 process.exit(fail ? 1 : 0);

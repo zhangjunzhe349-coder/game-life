@@ -35,6 +35,7 @@ cd game-life
 node tools/patch-index-mobile.js    # 先清编辑器注入（跑过浏览器/预览就会被重新注入）
 node tools/build-dist.js            # 产出 dist/：纯净运行时资源，约 460 KB
 node tools/browser-check.js --dist  # 把 87 项断言跑在产物上（不是跑在源码上）
+node tools/test-update-flow.js      # 升级链路：换成新版后「打开一次」就该看到新版
 ```
 
 发布（内置托管，无需账号）：
@@ -251,10 +252,14 @@ game-life/
 ├── tools/browser-check.js  # 浏览器冒烟：桌面 + 手机视口 / 渲染断言 / 交互测试 / 离线能力 / 面板明细 / 出 PNG
 │                            #   --dist          整组断言改跑在部署产物 dist/ 上
 │                            #   --url=<地址>    改跑在线上地址上（不走内置服务，验真实 MIME/缓存头/HTTPS）
+├── tools/test-update-flow.js # 第五层·升级链路：旧版吃满缓存 → 换新版 → **只打开一次**必须看到新内容
+│                            #   --old=<rev>     指定「旧版」提交（默认 HEAD~1，发布后用上一个 tag）
+│                            #   --simulate-no-fix  负向验证：摘掉三处修复，断言必须失败
 ├── tools/build-dist.js     # 生成可部署的纯净 dist/（上线用；含产物自检与注入闸门）
 │                            #   --mirror=<目录> 自检通过后同步到发布目录（内置托管不接受名为 dist 的目录）
 ├── tools/gen-icons.js      # 图标唯一入口：内置 SVG 源 → icon.svg + Web 4 张 PNG
 │                            #   + 安卓 5 密度 × 3 张 PNG + 自适应图标 XML（两边同源，不会改一边忘一边）
+│                            #   前景层必须真透明（PNG colorType=6），有像素断言守着
 ├── tools/patch-index-mobile.js # 给 index.html 打 PWA 资源补丁（幂等，顺带清除编辑器注入属性）
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
 ├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
@@ -264,7 +269,7 @@ game-life/
 ├── icon-512.png            # 高清图标 / 启动画面
 ├── icon-maskable-512.png   # 自适应图标（底色满铺、内容缩到 66%，四周留给系统裁切）
 ├── apple-touch-icon.png    # iOS 主屏幕图标（满铺版：iOS 会自己套一层超椭圆遮罩）
-├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v12）
+├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v13）
 ├── manifest.webmanifest    # PWA 安装配置
 ├── tools/diag-installable.js     # 问浏览器「为什么没有安装入口」（CDP：getAppManifest / getInstallabilityErrors）
 ├── .github/workflows/android.yml # 云端出 APK（本地不用装 Android Studio / JDK / Android SDK）
@@ -454,16 +459,28 @@ const px = (r) => r * KX;
 > **已知坑**：数组里**每个点必须 6 个元素**（两个控制点 + 一个锚点）。写成 8 个会产出
 > `undefined undefined` 的路径而不报错，必须靠下面的校验工具兜住。
 
-### 四层校验
+### 五层校验
 
 改动 `portrait.js` / `attributes.js` / `skills.js` / `life.js` / `storage.js` / `index.html` / `sw.js` / `app.js` 后依次运行：
 
 ```bash
-node tools/verify-portrait.js   # 静态：立绘 36 用例图层校验
-node tools/verify-wiring.js     # 静态：脚本清单 / GL.* 提供者 / 宿主节点 / 资源存在性 / sw 版本
-node tools/verify-migrate.js    # 静态：数据迁移 v1→v2→v3（防历史记录丢失、防小字被改写）
-node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互测试 + 手机视口 + 出 PNG
+node tools/verify-portrait.js   # ① 静态：立绘 36 用例图层校验
+node tools/verify-wiring.js     # ② 静态：脚本清单 / GL.* 提供者 / 宿主节点 / 资源存在性 / sw 版本
+node tools/verify-migrate.js    # ③ 静态：数据迁移 v1→v2→v3（防历史记录丢失、防小字被改写）
+node tools/browser-check.js     # ④ 动态：真跑页面 + 渲染断言 + 交互测试 + 手机视口 + 离线能力 + 出 PNG
+node tools/test-update-flow.js  # ⑤ 动态：升级链路 —— 换版后**打开一次**就该是新版（先跑 build-dist.js）
 ```
+
+改渲染后另跑 `browser-check.js --dist`（产物不是源码，两者不一样）；上线后再跑 `--url=<线上地址>`。
+
+**为什么第 ⑤ 层必须存在**（v1.7.4 事故）：前三层查源码与接线、第四层查「页面能不能跑」，
+**没有任何一层在查「用户手里那台旧机器换上新版之后会不会真的更新」**。
+四层全绿、APK 拆包也确认是新代码，用户拿到的却仍是旧界面 —— 失败点全在
+Service Worker 的换版链路（HTTP 缓存住 sw.js、新缓存装进旧文件、旧 SW 缓存优先一直供旧页面），
+而且**只在新旧交替的那一次**发生，静态检查和单次冒烟都天然看不到。
+`test-update-flow.js` 用真浏览器复现这个交替：旧提交起站吃满缓存 → 同端口同 profile 换新产物 →
+只打开一次 → 断言已是新版。`--simulate-no-fix` 做负向验证（摘掉修复必须失败），
+否则这条测试就是橡皮图章。
 
 - `verify-portrait.js`：无头 DOM 桩件跑一遍 `drawAll()`，检查坏值 `NaN/undefined`、
   路径语法、**填充路径必须 `Z` 闭合**（`fill: none` 的线稿豁免）、关键部位是否齐备。
@@ -622,3 +639,4 @@ git stash && git checkout v1.1.0
 | v1.7.3（打包） | 2026-09-24 | **安卓打包链路**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— APK 里跑的就是 v1.7.1 那份代码，所以 APK 的 versionName 也是 1.7.1）。起因：用户手机的自带浏览器菜单里没有安装入口。先用 `tools/diag-installable.js`（CDP 的 `Page.getAppManifest` + `Page.getInstallabilityErrors`，让浏览器自己说原因）确认站点侧完全合格 —— manifest 无解析错误、未报任何不可安装原因、SW 已激活并接管、缓存 23 项，判定问题在浏览器侧，改走原生打包。① 新增 `android-pack/`（Capacitor 8.5.2 壳）与 `.github/workflows/android.yml`，**本地不需要装 Android Studio / JDK / Android SDK**。② **定制必须可重放**：`android/` 是 `npx cap add android` 每次从模板重新生成的（不入库），手动改一次就会被覆盖，所以图标 / 启动画面 / 背景色 / 版本号全部落在 `android-pack/scripts/prepare-android.js` 里，并逐个断言覆盖的图片尺寸与模板原图一致 —— 缩放比例错了很难从截图上发现。③ **签名必须固定**：密钥由 Python `cryptography` 生成 PKCS12 存入仓库 Secret（不入库），`build.gradle` 里显式指定 `signingConfigs.debug`。早期版本把密钥放在 `~/.android/debug.keystore` 依赖 Gradle 对 `user.home` 的推断，CI 上推断不到会**静默退回自动生成的临时签名** —— APK 一切正常、badging 全对，只有对比证书指纹才发现，而后果是覆盖升级必被系统以「签名不符」拒绝（唯一绕过方式是卸载，会清掉 App 内数据）。现加断言「keystore 证书指纹 == APK 实际签名指纹」守住。④ **产物自检**：确认 APK 内含 `assets/public/index.html`（否则装上去是白屏），并从**编译后**的 badging 读包名 / 应用名 / 版本号 / 启动入口 —— aapt2 会重写资源名，按 `res/mipmap-*/ic_launcher.png` 这种原路径是查不到的（第一版自检就因此误报失败）。⑤ 发布到固定 tag `android-latest` + 固定文件名 `GameLife.apk`，下载链接永久不变 |
 | v1.7.2（工具链） | 2026-09-23 | **发布链路打通 + 校验工具三点增强**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— 线上跑的就是 v1.7.1 那份代码）。① **内置托管发布**：不依赖任何账号授权即可得到 https 地址，手机可直接打开（⚠ 内置托管会把名为 `dist` 的目录当构建产物**排除**，实测直接发布 `dist/` 得到**空站点**；故发布用另一个名字的目录，并给构建脚本加 `--mirror=<目录>`，自检通过后才镜像，一次完成、不留时间窗）。② **`browser-check.js` 加 `--url=<地址>`**：同一组断言跳过内置服务直接跑在**线上地址**上 —— 线上与本地至少有三处不同（真实域名的 MIME、缓存头、子路径与 HTTPS），恰好都是会导致「页面能看但离线失效」的地方。③ **新增 5 条离线能力断言**：实测 `sw.js` 的 MIME 是 JS 类型、Service Worker 真的注册并接管页面、缓存真的建立且装了资源（断言数 82 → **87**；此前只在源码里查过配置，没验过注册结果，而 `register('sw.js').catch(() => {})` 会把失败静默吞掉）。④ **修掉一处会掩盖真问题的偶发失败**：启动等待原为「readyState 完成 + 固定 2200ms」，跑远程（冷启动二十多个资源）会偶发踩空，`overallScore()` 内部读到 `undefined` 抛 TypeError → 脚本直接 `exit 1`，输出只剩一句没头没尾的「页面求值失败」，把真正的断言结果全盖掉；改为**轮询到 `GL.state.attributes` 就位**，并把那次调用单独 try 住，超时也继续往下测（打印启动诊断：缺哪些 `GL.*`、哪些脚本标签、几条页面异常） |
 | v1.7.4 | 2026-09-24 | **实机反馈三项修正**。① **去掉图标一圈黑边**：根因是 `icon.svg` 在紫色渐变块外面还套了一圈 `#0d0f1a` 近黑（本机看着像精致的深色描边，到启动器遮罩下就是一圈黑边），安卓自适应图标的 `background` 层更是直接用了 `#08090d`、`foreground` 层还是一张自带底色的**不透明**方图 —— 系统裁圆后圆内是近黑底 + 中间一块紫，必然露边。现改为**满铺紫色渐变 + 透明前景层**（只画闪电、收进中心安全区），legacy 图标（Android 7 及以下）同样改满铺 / 整圆；`apple-touch-icon` 改用满铺版（iOS 会自己套超椭圆遮罩，自带圆角会变成「圆角套圆角」且外圈易露异色边）。同时把图标生成**收敛到唯一入口** `tools/gen-icons.js`：一次写出 `icon.svg` + 4 张 Web PNG + 安卓 5 密度 × 3 张 PNG + 自适应图标 XML —— 两边同源，不会再"改了一边忘了另一边"；顺带修掉小尺寸被 `--window-size` 钳制的问题（DSF 由写死的 0.25 改为 `size/win`，窗口一律 ≥ 800px）。② **立绘下方读数精简**：原为三行（身高/体重/肌肉 · 发型/衣橱件数 · 今日饮水/距上次），窄屏上把立绘压得很碎，现只留**一行**「身高 / 体重 / 发型」—— 饮水在生理面板、衣橱在「体型与衣橱」面板都有完整视图，舞台注脚不必重复；随之删掉仅供它使用的 `todayMl()` / `lastDrink()`。③ **顶部固定预留系统状态栏**：**安卓的 WebView 与独立应用 `env(safe-area-inset-top)` 一律返回 0**，而系统状态栏照样占着最上面一条 → 页头被压住（APK 里尤其明显）；改为 `calc(var(--s4) + max(var(--sa-t), 30px))`，任何环境下都至少留 30px（≈安卓状态栏高度），末尾全屏那条规则再 +10px。verify-wiring 的「全屏留白兜底」断言同步放宽**写法**（原先只认 `var(--sa-t) … + … px` 的加法形式，`max()` 写法会被误判成没兜底；要求没变：必须同时出现安全区变量与固定 px）。browser-check 仍 **87 项全绿**（全屏层叠实测 `46px → 56px`）。sw 缓存升 v12 |
+| v1.7.5 | 2026-09-24 | **修「装了新版却什么都没变」**（v1.7.4 上线后的实机反馈：装上新 APK，只有图标变了、界面一律是老样子）。四层校验全绿、APK 拆包也确认是新代码 —— 问题整条都在**换版链路上**，四层校验一层都覆盖不到，为此新增第五层 `tools/test-update-flow.js`。四个成因，逐个修：① **sw.js 自己也被 HTTP 缓存住**（GitHub Pages / 内网都会给 max-age），更新检查拿到旧字节就认定「没有新版」→ `register('sw.js', { updateViaCache: 'none' })` + 每次打开 `reg.update()`。② **装缓存时 `cache.add(u)` 默认走 HTTP 缓存**，手里留着旧副本时新缓存里装的仍是旧文件（版本号变了、内容没变）→ 改 `cache.add(new Request(url, { cache: 'reload' }))` 强制取真身。③ **换版后没人刷页面**：旧 SW 是缓存优先，会把旧 `index.html` / 旧 `app.js` 一直供下去 → **页面侧**监听 `controllerchange` 自刷一次（只在本来就有 controller 时挂，`reloadedForUpdate` 兜底，无刷新循环）。④ **顺带抓到一个自造的死锁**：把 `Client.navigate()` 放进 `activate` 的 `waitUntil` 里必然挂死 —— 本 SW 在 activate 落地前**不处理 fetch**，而 navigate 触发的正是同源导航请求，实测挂 37 秒后报 `Cannot navigate to URL`；同一形状的坑还有把 `await self.skipWaiting()` 写进 `install`（`skipWaiting()` 的 promise 要等激活才 resolve，而激活又要等 install 结束 —— 一 await 就是新版永远升不上去，且**新缓存已经建出来了**，从 `caches.keys()` 看像是装成功了）。现在 SW 侧只留延迟一拍的兜底 navigate（救「页面上跑的还是没有 `controllerchange` 监听的旧代码」那一次）。**第五层怎么测**：用 `git show HEAD~1` 取旧版 `sw.js` / `app.js` / `style.css` 起站、让浏览器把旧缓存吃满（= 用户手里那台机器），再同端口同 profile 换成新产物、**只打开一次**，断言看到新版且应用启动完好、读数 1 行、顶部留白变大、缓存已换代、只刷新一次；`--simulate-no-fix` 把三处修复全摘掉做负向验证（缺了它这就是一张橡皮图章）。sw 缓存升 v13 |

@@ -138,6 +138,40 @@ const mf = fs.readFileSync(path.join(ANDROID, 'app', 'src', 'main', 'AndroidMani
 if (!/android:icon="@mipmap\/ic_launcher"/.test(mf)) fail('AndroidManifest 没引用 @mipmap/ic_launcher');
 if (!/android:roundIcon="@mipmap\/ic_launcher_round"/.test(mf)) fail('AndroidManifest 没引用 @mipmap/ic_launcher_round');
 
+/* ---------- ③b 启动器图标：把「一圈黑」和「一片白」这两次实机返工钉死 ----------
+   两个都是**从源代码、从截图、从静态检查都看不出来**的问题（改的确实是图标文件，
+   但系统怎么合成这两层才算数）。所以断言必须落在「合成规则」上，而不是「文件存在」。 */
+{
+  const bgPath = path.join(APP_RES, 'values', 'ic_launcher_background.xml');
+  const bg = fs.readFileSync(bgPath, 'utf8');
+  /* ① 背景层的纯色兜底不能是模板的近黑 —— 系统遮罩裁圆后，圆内近黑 + 中间紫
+       看起来就是「紫块外面套一圈黑边」。 */
+  if (/#08090d/i.test(bg)) fail('自适应图标背景层仍是模板的近黑 #08090d —— 启动器遮罩下会露出黑边');
+  if (!/<color name="ic_launcher_background">#[0-9A-Fa-f]{6}<\/color>/.test(bg)) {
+    fail('读不到 ic_launcher_background 的颜色值 —— 模板结构变了，这条断言已经失去意义，需要重写');
+  }
+  /* ② 两处 anydpi XML 必须「背景层接紫色渐变 + 前景层接图标前景」。
+       接错了（例如前景层指到 legacy 方图）就会把背景整块盖住。 */
+  for (const f of ['ic_launcher.xml', 'ic_launcher_round.xml']) {
+    const x = fs.readFileSync(path.join(APP_RES, 'mipmap-anydpi-v26', f), 'utf8');
+    if (!/android:drawable="@drawable\/ic_launcher_background"/.test(x)) fail(`${f} 的背景层没指向紫色渐变 drawable`);
+    if (!/android:drawable="@mipmap\/ic_launcher_foreground"/.test(x)) fail(`${f} 的前景层没指向 ic_launcher_foreground`);
+  }
+  /* ③ 前景层必须是**真透明**（PNG colorType=6）。
+       它是要叠在背景层上的；一张带底色的不透明方图会把背景整块盖住 ——
+       v1.7.4 就是这样从「紫」变成「一片白」的（无头浏览器默认白底被一起截了进去）。 */
+  let fgChecked = 0;
+  for (const d of fs.readdirSync(APP_RES).filter((n) => /^mipmap-/.test(n))) {
+    const p = path.join(APP_RES, d, 'ic_launcher_foreground.png');
+    if (!fs.existsSync(p)) continue;
+    const ct = fs.readFileSync(p)[25];          // IHDR 里的 colorType
+    if (ct !== 6) fail(`${d}/ic_launcher_foreground.png 没有 alpha 通道（colorType=${ct}）—— 前景层必须透明`);
+    fgChecked++;
+  }
+  if (!fgChecked) fail('没有检查到任何 ic_launcher_foreground.png —— 镜像里前景层不见了');
+  console.log(`  ③b 启动器图标  背景层紫色、前景层透明（${fgChecked} 个密度）`);
+}
+
 const wwwDir = path.join(PACK, 'www');
 const webFiles = fs.existsSync(wwwDir) ? walk(wwwDir).length : 0;
 if (!webFiles) fail('www/ 是空的 —— 页面资源没同步进来，装上去会是白屏');

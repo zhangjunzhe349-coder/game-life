@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 自适应图标背景层的**纯色兜底**。真正的渐变在 drawable/ic_launcher_background.xml，
-         这里留一个同名 color 资源，以防模板别处按 @color/ic_launcher_background 引用。 -->
+    <!-- 自适应图标背景层的**纯色兜底**，与 drawable/ic_launcher_background.xml 的渐变同色系。
+         模板原值是 #08090d 近黑 —— 那正是「桌面图标外面一圈黑」的来源：系统把图标裁成
+         圆形/水滴形后，圆内是近黑底、中间一块紫，看起来就是紫块外面套一圈黑边。
+         ⚠ 模板的 mipmap-anydpi-v26/*.xml 原本引用 @color/ic_launcher_background；
+         镜像里的那两份 XML 已改为引用 @drawable/ic_launcher_background（紫色渐变）。
+         两边都保持紫色，谁被用上都不会露黑边；prepare-android.js 有断言守这两处。 -->
     <color name="ic_launcher_background">#6C5CF3</color>
 </resources>

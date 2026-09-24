@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.7.4';
+  const APP_VERSION = '1.7.5';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 记录天数 ---------- */
@@ -257,9 +257,35 @@
       document.querySelectorAll('.rv:not(.in)').forEach((e) => e.classList.add('in'));
     }, 1200);
 
-    // Service Worker（PWA 离线 + 安装）
+    /* Service Worker（PWA 离线 + 安装 + 换版自愈）
+       ─────────────────────────────────────────────────────────
+       下面两段一起解决「装了新版却什么都没变」（v1.7.4 实机事故）：
+       ① register 的 updateViaCache:'none' —— **sw.js 自己也会被 HTTP 缓存住**
+          （GitHub Pages、内网服务器都会给 max-age）。更新检查拿到的是旧字节，
+          浏览器就认定「没有新版」，新 SW 根本装不上 —— 资源改得再对也白搭。
+       ② controllerchange → 自刷一次 —— 旧 SW 是缓存优先，会把旧 index.html /
+          旧 app.js 一直供下去；新 SW 接管（clients.claim）那一刻刷一次，
+          用户「打开一次」就看到新版，不必关掉再开。
+          只在**本来就有 controller** 时挂监听：首次安装无旧版可换，白刷没意义。
+          每次页面加载最多刷一次（reloadedForUpdate 兜底），刷新后 controller
+          不再变化，不存在刷新循环。
+       ⚠ 不把刷新交给 SW 的 activate 去做 —— 实测那条路必死锁：
+         SW 在 activate 的 waitUntil 落地前不处理 fetch，navigate 触发的同源导航
+         没人应答，挂 37 秒后失败（tools/test-update-flow.js 实测原话
+         「Cannot navigate to URL」）。SW 侧只留一份延迟的兜底，主力是这里。 */
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then((reg) => { reg.update().catch(() => {}); })
+        .catch(() => {});
+
+      if (navigator.serviceWorker.controller) {
+        let reloadedForUpdate = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (reloadedForUpdate) return;
+          reloadedForUpdate = true;
+          location.reload();
+        });
+      }
     }
 
     // 喝水提醒：每分钟检查一次

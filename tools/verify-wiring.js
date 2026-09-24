@@ -186,9 +186,55 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 12;   // v1.7.4：图标去黑边（Web + 安卓）+ 立绘读数精简 + 顶部状态栏预留，资源有变必须 ≥ v12
+const MIN_SW_VER = 13;   // v1.7.5：图标前景层改透明 + SW 升级机制加固，资源有变必须 ≥ v13
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
+
+/* ---------- 6g. SW 必须能把新版本送到用户眼前（v1.7.4 实机事故守门） ----------
+   事故：改了代码、也发了新包，用户实机反馈「没有任何变化」。
+   四个成因都不是「代码写错了」，静态校验全绿也照样发生：
+     ① sw.js 自己也被 HTTP 缓存住 → 更新检查拿到旧字节 → 浏览器认定「没有新版」；
+     ② 装缓存时 `cache.add(u)` 走 HTTP 缓存 → 新缓存里装的还是旧文件；
+     ③ 旧 SW 是缓存优先，接管时用户那张页面已经用旧脚本跑起来了，不刷就看不到新版；
+     ④ 「让旧页面刷新」这一步本身有个死锁（见下），写错的话表面全绿、实际送不出去。
+   这些一旦被改回去，界面依旧正常、构建依旧成功，只是用户永远看到旧版。
+   所以在此钉死：缺任一条就报错。
+   ⚠ 这里只覆盖「静态可判」的部分；「真的能在一次打开内完成换代」由第五层
+   tools/test-update-flow.js 用真浏览器跑 —— 静态判不出 §4 里的死锁顺序。 */
+if (/cache:\s*'reload'/.test(sw)) ok.push('SW 装缓存时绕开 HTTP 缓存（cache: reload），新缓存不会装进旧文件');
+else problems.push('sw.js 装缓存没有用 cache: \'reload\' —— 会走 HTTP 缓存，升级后新缓存里可能仍是旧文件，用户界面看不到变化');
+
+const app = fs.readFileSync(path.join(ROOT, 'js', 'app.js'), 'utf8');
+if (/updateViaCache:\s*'none'/.test(app)) ok.push('注册 SW 时 updateViaCache: none（脚本本身不吃 HTTP 缓存，否则更新检查永远拿到旧字节，新 SW 装不上）');
+else problems.push('app.js 注册 SW 时没写 updateViaCache: none —— sw.js 自己会被 HTTP 缓存住，浏览器会认定「没有新版」');
+if (/reg\.update\(\)/.test(app)) ok.push('每次打开主动查一次 SW 更新（reg.update）');
+else problems.push('app.js 没在打开时 reg.update()，只能等浏览器自己想起来查更新');
+
+/* ③ 页面侧自刷是主力：旧 SW 缓存优先，只有页面自己重载才拿得到新资源 */
+if (/addEventListener\('controllerchange'[\s\S]{0,240}?location\.reload\(\)/.test(app)) {
+  ok.push('页面侧监听 controllerchange 自刷（换版后打开一次就看到新界面 —— 主力机制）');
+} else {
+  problems.push('app.js 没有监听 controllerchange 自刷 —— 旧 SW 缓存优先会把旧界面一直供下去，用户「装了新版却什么都没变」');
+}
+
+/* ④ 两个死锁：写成「看起来更规范」的 await 化就会送不出新版 */
+const installBody = (sw.match(/addEventListener\('install'[\s\S]*?\n\}\);/) || [''])[0];
+if (!/await\s+self\.skipWaiting\(\)/.test(installBody)) {
+  ok.push('install 里没有 await skipWaiting()（它的 promise 要等激活才 resolve，一 await 就是死锁）');
+} else {
+  problems.push("install 里写了 await self.skipWaiting() —— 死锁：install 永不结束、新版永远升不上去；而新缓存已经建好，从 caches.keys() 看『像是装成功了』");
+}
+const activateBody = (sw.match(/addEventListener\('activate'[\s\S]*?\n\}\);/) || [''])[0];
+if (/waitUntil\([\s\S]*?\.navigate\(/.test(activateBody) && !/setTimeout\([\s\S]*?\.navigate\(/.test(activateBody)) {
+  problems.push('activate 的 waitUntil 里直接调了 Client.navigate() —— 死锁：本 SW 在 activate 落地前不处理 fetch，导航请求没人应答，实测挂 37 秒后报「Cannot navigate to URL」');
+} else {
+  ok.push('activate 里没有在 waitUntil 中直接 navigate（避开了「导航请求无人应答」的死锁）');
+}
+if (/clients\.matchAll/.test(sw) && /\.navigate\(/.test(sw)) {
+  ok.push('SW 侧保留延迟一拍的兜底刷新（救「页面上跑的还是旧代码」那一次，例如 v1.7.4 → v1.7.5）');
+} else {
+  problems.push('sw.js 连兜底刷新都没了 —— 页面上跑的还是没有 controllerchange 监听的旧代码时（v1.7.4 → v1.7.5 正是这种），新版永远送不出去');
+}
 
 /* ---------- 输出 ---------- */
 ok.forEach((s) => console.log('  ✓ ' + s));
