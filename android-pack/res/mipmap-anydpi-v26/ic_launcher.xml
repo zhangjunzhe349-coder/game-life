@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标（Android 8+）：渐变背景层 + 只含闪电的透明前景层。
+     这两层分层是关键 —— 合成后是一张「紫底闪电」，而不是把一张带底色的方图塞进圆形遮罩。 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

@@ -865,9 +865,15 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
   }
   .tab.active::after { display: none; }
   /* 底部留白 = 标签栏高度 + 安全区，否则最后一屏内容会被悬浮栏压住 */
-  /* 顶部同样让开安全区：iOS 的 black-translucent 状态栏是浮在页面之上的，
-     不让开的话页头会被时间/电量压住（安卓为 0，无副作用） */
-  #main { padding: calc(var(--s4) + var(--sa-t)) calc(var(--s4) + var(--sa-r)) calc(112px + var(--sa-b)) calc(var(--s4) + var(--sa-l)); }
+  /* 顶部固定预留「系统状态栏」的高度。
+     为什么不能只靠 --sa-t：
+     ① iOS 的 black-translucent 状态栏浮在页面之上，env() 有值，但只有 iOS 给；
+     ② 安卓的 WebView / 独立应用一律返回 0（安卓不进 safe-area 插值），
+        而系统状态栏（时间 / 电量）照样占着最上面一条 —— 页头就被压住了；
+     ③ 浏览器标签页里地址栏是自动隐藏的，页头贴着顶同样难看。
+     故取 max(env, 30px)：iOS 用手势/刘海实测值，其余环境兜底 30px（≈安卓状态栏高度）。
+     全屏那条规则在此之上还要再多 10px（见文件末尾），所以两者不会互相抵消。 */
+  #main { padding: calc(var(--s4) + max(var(--sa-t), 30px)) calc(var(--s4) + var(--sa-r)) calc(112px + var(--sa-b)) calc(var(--s4) + var(--sa-l)); }
   .hud { grid-template-columns: 1fr; gap: var(--s4); }
   .stage { min-height: 380px; }
   .hud-bar { padding: var(--s4); gap: var(--s3); }
@@ -897,12 +903,16 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 }
 
 /* ============ 全屏启动（安卓 WebAPK）============
-   manifest 的 display 为 fullscreen，系统状态栏会被隐藏：页面直接顶到屏幕
-   最上沿，且此时 env(safe-area-inset-top) 为 0（没有东西挡着了，系统不再让位）。
-   光靠 --sa-t 会让页头贴着屏幕边缘，这里补一条固定留白。
+   manifest 的 display 为 fullscreen，系统状态栏被隐藏：页面直接顶到屏幕最上沿，
+   此时 env(safe-area-inset-top) 为 0（没有东西挡着了，系统不再让位）。
+   即便如此也要留住那一条空白 —— 页头贴着屏幕边缘很难看（用户明确要求"预留"）。
+   这里比窄屏常态**再多 10px**：常态下上方总有东西占位（浏览器地址栏 / 系统状态栏），
+   全屏是真的什么都没有了，多留一点视觉上才不局促。
+   也正因为这个差值，browser-check 能实测出「这条规则确实参与了层叠」——
+   两处取值完全相同的话，它就退化成一条永远不生效的冗余规则了。
    standalone（iOS）与桌面浏览器标签页都不匹配此查询，不受影响。 */
 @media (display-mode: fullscreen) {
-  #main { padding-top: calc(var(--s4) + var(--sa-t) + 10px); }
+  #main { padding-top: calc(var(--s4) + max(var(--sa-t), 30px) + 10px); }
   /* 全屏下底部手势条仍然存在，底部留白沿用 --sa-b 即可 */
 }
 

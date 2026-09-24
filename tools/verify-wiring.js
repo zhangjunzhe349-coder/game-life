@@ -162,7 +162,12 @@ if (!/display-mode:\s*fullscreen/.test(css)) {
     'css 缺少 @media (display-mode: fullscreen) 的顶部留白兜底 —— ' +
     '全屏时系统状态栏被隐藏，env(safe-area-inset-top) 归零，页头会直接贴到屏幕最上沿',
   );
-} else if (/padding-top:[^;]*var\(--sa-t\)[^;]*\+[^;]*px|padding-top:[^;]*px[^;]*\+[^;]*var\(--sa-t\)/.test(css.match(/@media \(display-mode: fullscreen\)[\s\S]*?\n\}/)?.[0] || '')) {
+} else if (/padding-top:[^;]*var\(--sa-t\)[^;]*[\d.]+px|padding-top:[^;]*[\d.]+px[^;]*var\(--sa-t\)/.test(css.match(/@media \(display-mode: fullscreen\)[\s\S]*?\n\}/)?.[0] || '')) {
+  /* 判据 = 「padding-top 里同时出现 var(--sa-t) 和一个固定 px 值」，顺序不限、也不要求用 + 连接。
+     早先写的是 `var(--sa-t)…+…px`，只认加法；后来改成
+     `calc(var(--s4) + max(var(--sa-t), 30px))` —— 语义一样（保底 30px），
+     但它没有 `+` 落在两者之间，旧正则就误判成"没有兜底"。
+     放宽的是**写法**，不是**要求**：必须同时有安全区变量和固定 px，缺一仍然报错。 */
   ok.push('全屏模式下页头留白兜底就位（--sa-t 归零时仍有固定留白）');
 } else {
   problems.push('全屏媒体查询里没看到「固定留白 + --sa-t」的组合，状态栏隐藏后页头可能贴边');
@@ -181,7 +186,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 11;   // v1.7.1：全屏启动（display: fullscreen）+ 页头安全区，资源有变必须 ≥ v11
+const MIN_SW_VER = 12;   // v1.7.4：图标去黑边（Web + 安卓）+ 立绘读数精简 + 顶部状态栏预留，资源有变必须 ≥ v12
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

@@ -2,19 +2,10 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.7.1';
+  const APP_VERSION = '1.7.4';
   GL.VERSION = APP_VERSION;
 
-  /* ---------- 工具：今日饮水 ---------- */
-  function todayMl() {
-    const k = GL.todayKey(Date.now());
-    return GL.state.physiology.hydration.logs
-      .filter((l) => GL.todayKey(l.t) === k).reduce((s, l) => s + l.ml, 0);
-  }
-  function lastDrink() {
-    const logs = GL.state.physiology.hydration.logs;
-    return logs.length ? logs[logs.length - 1].t : null;
-  }
+  /* ---------- 记录天数 ---------- */
   function recordDays() {
     const days = new Set();
     const add = (arr) => (arr || []).forEach((x) => days.add(GL.todayKey(x.t)));
@@ -44,15 +35,18 @@
   }
 
   /* ---------- 舞台底部读数 ---------- */
+  /* 只留「体型 + 发型」。
+     原本这里是三行：身高/体重/肌肉、发型/衣橱件数、今日饮水/距上次。
+     窄屏上三行读数把立绘压得很碎（用户反馈"很乱"），而且信息本就在别处有完整视图：
+     饮水在生理面板、衣橱在「体型与衣橱」面板、肌肉量在属性/生理里。
+     这里作为舞台的注脚，只保留一眼能核对体型的两项 + 发型即可。 */
   function renderStageBase() {
     const el = document.getElementById('stage-base');
     if (!el) return;
     const a = GL.state.avatar;
     const style = HAIR_NAMES[a.hairStyle] || a.hairStyle;
     el.innerHTML = `
-      <span>身高 <b>${a.height}</b>cm · 体重 <b>${a.weight}</b>kg · 肌肉 <b>${a.muscle}</b></span>
-      <span>发型 <b>${style}</b> · 衣橱 <b>${(a.wardrobe || []).length}</b> 件</span>
-      <span>今日饮水 <b>${todayMl()}</b>ml · 距上次 <b>${lastDrink() ? GL.fmtRel(lastDrink()) : '未记录'}</b></span>`;
+      <span>身高 <b>${a.height}</b>cm · 体重 <b>${a.weight}</b>kg · 发型 <b>${style}</b></span>`;
   }
 
   const HAIR_NAMES = { short: '短发', buzz: '寸头', long: '长发', ponytail: '马尾', bald: '光头' };

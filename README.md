@@ -178,15 +178,22 @@ APK 与 PWA 的差别：
 - **上架应用商店需要换成正式签名**（密钥移入 Secrets、补 `signingConfigs.release`）。
   现在的包是调试签名，只适合自己侧载。
 
-### 全屏程度：安卓连状态栏一起去掉（v1.7.1）
+### 全屏程度：安卓连状态栏一起去掉（v1.7.1；v1.7.4 起顶部固定预留）
 
 manifest 的 `display` 为 `fullscreen`、`display_override` 为 `["fullscreen", "standalone"]`：
 
 - **浏览器标签页里打开**：当然有地址栏 —— 这不是配置问题，是没装。
 - **装到主屏幕后**：安卓连顶部状态栏（时间/电量）一起去掉，真全屏；
   **iOS 系统不支持 fullscreen，按规范回落到 standalone**（状态栏还在，这点绕不过去）。
-- 全屏时 `env(safe-area-inset-top)` 会归零（没有东西挡着了），所以 CSS 里有一条
-  `@media (display-mode: fullscreen)` 的固定留白兜底，否则页头会贴到屏幕最上沿。
+- **顶部一律留一条空白**（v1.7.4，用户明确要求"要预留，不预留不好看"）：
+  窄屏 `#main` 的 padding-top 取 `calc(var(--s4) + max(var(--sa-t), 30px))`
+  —— 全屏时 `env(safe-area-inset-top)` 会归零，但有 `max()` 兜着，至少留 30px（≈安卓状态栏高度），
+  页头不会贴到屏幕最上沿。末尾那条 `@media (display-mode: fullscreen)` 在此之上**再多 10px**：
+  常态下上方总还有东西占位（浏览器地址栏 / 系统状态栏），全屏是**真的什么都没有**了。
+
+> ⚠ **不能只认 `--sa-t`**：**安卓的 WebView 与独立应用一律返回 0**（安卓不做 safe-area 插值），
+> 而系统状态栏照样占着最上面一条 —— APK 里就靠那 30px 兜住。只写 `var(--sa-t)` 等于在安卓上完全没预留。
+> `max()` 需要 Chrome 79+ / Safari 11.1+（现代安卓与 iOS 均满足）。
 
 > ⚠ **两个改动必须成对**：浏览器**优先读 `display_override`**，只把 `display` 改成 fullscreen
 > 在安卓上不会生效；而 `display_override` 里必须留着 `standalone`，否则 iOS 没有可用项会退回浏览器模式。
@@ -246,17 +253,18 @@ game-life/
 │                            #   --url=<地址>    改跑在线上地址上（不走内置服务，验真实 MIME/缓存头/HTTPS）
 ├── tools/build-dist.js     # 生成可部署的纯净 dist/（上线用；含产物自检与注入闸门）
 │                            #   --mirror=<目录> 自检通过后同步到发布目录（内置托管不接受名为 dist 的目录）
-├── tools/gen-icons.js      # 由 icon.svg 生成各尺寸 PNG 图标（含 maskable 与 iOS 尺寸）
+├── tools/gen-icons.js      # 图标唯一入口：内置 SVG 源 → icon.svg + Web 4 张 PNG
+│                            #   + 安卓 5 密度 × 3 张 PNG + 自适应图标 XML（两边同源，不会改一边忘一边）
 ├── tools/patch-index-mobile.js # 给 index.html 打 PWA 资源补丁（幂等，顺带清除编辑器注入属性）
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
 ├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
 ├── fonts/                  # 自托管字体 6 个 woff2（离线可用，不依赖 Google Fonts）
-├── icon.svg                # 矢量图标源文件（所有 PNG 都由它生成）
-├── icon-192.png            # 安卓主屏幕图标
+├── icon.svg                # 矢量图标（由 gen-icons.js 写出，与各 PNG 同源）
+├── icon-192.png            # 安卓主屏幕图标 / 标签页 favicon
 ├── icon-512.png            # 高清图标 / 启动画面
-├── icon-maskable-512.png   # 自适应图标（内容缩到 80%，四周留给系统裁切）
-├── apple-touch-icon.png    # iOS 主屏幕图标（Safari 不认 SVG，必须 PNG）
-├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v11）
+├── icon-maskable-512.png   # 自适应图标（底色满铺、内容缩到 66%，四周留给系统裁切）
+├── apple-touch-icon.png    # iOS 主屏幕图标（满铺版：iOS 会自己套一层超椭圆遮罩）
+├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v12）
 ├── manifest.webmanifest    # PWA 安装配置
 ├── tools/diag-installable.js     # 问浏览器「为什么没有安装入口」（CDP：getAppManifest / getInstallabilityErrors）
 ├── .github/workflows/android.yml # 云端出 APK（本地不用装 Android Studio / JDK / Android SDK）
@@ -264,7 +272,7 @@ game-life/
     ├── capacitor.config.json     # 包名 com.jayzen.gamelife / 应用名 Game Life
     ├── scripts/prepare-android.js # 可重放的定制：图标 / 启动画面 / 版本号 / 固定签名
     │                              #   （android/ 由 cap add 每次重建，不入库）
-    ├── res/                # 覆盖进原生工程的安卓资源镜像（图标 15 + 启动画面 11 + 背景色）
+    ├── res/                # 覆盖进原生工程的安卓资源镜像（图标 15 + 启动画面 11 + 自适应图标与背景层 XML 3）
     └── keystore/           # 签名密钥不入库，由 CI 从仓库 Secret 恢复
 ```
 
@@ -501,13 +509,25 @@ node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互�
   依赖 `ws`：装到仓库里（`npm i ws`），或 `NODE_PATH=<含 ws 的 node_modules 目录>` 指向已有的，
   然后 `NODE_PATH=<该 node_modules> node tools/browser-check.js`。
 
-#### 两个配套脚本（v1.7.0）
+#### 图标与配套脚本（v1.7.0；v1.7.4 起统一到一处）
 
-- **`tools/gen-icons.js`**：把 `icon.svg` 渲染成 4 个 PNG 图标（安卓 192/512、maskable 512、
-  iOS 180）。不装 sharp / cairosvg 之类依赖，借本机已有的 Chromium 无头渲染。
+- **`tools/gen-icons.js`**：**图标的唯一入口**。内置 SVG 源 → 写出 `icon.svg` 与 4 张 Web PNG
+  （192 / 512 / maskable 512 / iOS 180），**以及安卓的 5 密度 × 3 张 PNG 与自适应图标 XML**
+  （落到 `android-pack/res/`）。Web 与安卓放在同一个脚本里，是因为图标只有**一份设计** ——
+  拆成两个脚本迟早漂移（改了一边忘了另一边，而且从界面上很难看出来）。
+  不装 sharp / cairosvg 之类依赖，借本机已有的 Chromium 无头渲染。
   踩过两个坑：相对路径的 `--screenshot` **不落在当前目录**（按浏览器自己的工作目录算，必须传绝对路径）；
   `--window-size` 有**最小尺寸钳制**，传 180 会得到一张只截到左上角的废图（文件很小、也不报错）。
-  现解法：窗口开成目标的 4 倍，再用 `--force-device-scale-factor=0.25` 缩回来。
+  现解法：窗口一律开到 800px 以上，再用 `--force-device-scale-factor=size/win` 缩回来
+  —— DSF 取 `size/win` 而不是写死的 0.25，是因为安卓有 48px 这种小图，4 倍窗口也才 192px，仍会被钳制。
+
+- **安卓图标为什么必须分层（v1.7.4 修「一圈黑边」）**：
+  自适应图标 = `background`（`drawable/ic_launcher_background.xml`，紫色渐变、**满铺**）
+  + `foreground`（`ic_launcher_foreground.png`，**透明底**、只画闪电、内容收进中心安全区）。
+  早先背景是 `#08090d` 近黑、前景还是一张自带底色的不透明方图 —— 系统把图标裁成圆形后，
+  圆内是近黑底、中间一块紫色，看起来就是**一圈黑边**（用户实机反馈）。
+  现在两层都不含第二种颜色：任何遮罩形状下，边缘露出的都是同一种紫。
+  legacy 图标（`ic_launcher.png` / `ic_launcher_round.png`，Android 7 及以下用）同样改成满铺 / 整圆，不带外圈。
 - **`tools/patch-index-mobile.js`**：改 `index.html` 请用它，别手工编辑。
   这个文件会被外部编辑器**持续**注入 `data-page-node-id`（清干净后几秒内就回来），
   手工 `Edit` 时常因这些多出来的属性而匹配失败。该脚本把「清除注入」与「应用改动」
@@ -601,3 +621,4 @@ git stash && git checkout v1.1.0
 | v1.7.1 | 2026-09-23 | **安卓全屏启动**：`display` 由 `standalone` 改为 `fullscreen`，`display_override` 由 `["standalone","minimal-ui"]` 改为 `["fullscreen","standalone"]`（⚠ 浏览器**优先读 `display_override`**，只改 `display` 在安卓上不生效；列表里保留 `standalone` 是 iOS 的规范回落项）。全屏后系统状态栏消失、`env(safe-area-inset-top)` 归零，故新增 `@media (display-mode: fullscreen)` 的页头固定留白兜底。**顺带修掉一个潜伏 bug**：`--sa-t` 变量定义了却全仓无人引用 —— iOS 的 `black-translucent` 状态栏是浮在页面之上的，页头一直被时间/电量压着；现补进 `#main` 顶部内边距。校验：verify-wiring 增 3 条断言（`display` 与 `display_override` 必须成对为 fullscreen / 必须有 fullscreen 留白兜底 / `--sa-t` 必须被消费），browser-check 78 → **82 项**（不读源码：从部署产物的 CSSOM 取该规则，再用 CSSOM 临时解除媒体条件量**真实层叠结果** `16px → 26px`，证明它没被上面的 `padding` 简写盖掉）。sw 缓存升 v11 |
 | v1.7.3（打包） | 2026-09-24 | **安卓打包链路**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— APK 里跑的就是 v1.7.1 那份代码，所以 APK 的 versionName 也是 1.7.1）。起因：用户手机的自带浏览器菜单里没有安装入口。先用 `tools/diag-installable.js`（CDP 的 `Page.getAppManifest` + `Page.getInstallabilityErrors`，让浏览器自己说原因）确认站点侧完全合格 —— manifest 无解析错误、未报任何不可安装原因、SW 已激活并接管、缓存 23 项，判定问题在浏览器侧，改走原生打包。① 新增 `android-pack/`（Capacitor 8.5.2 壳）与 `.github/workflows/android.yml`，**本地不需要装 Android Studio / JDK / Android SDK**。② **定制必须可重放**：`android/` 是 `npx cap add android` 每次从模板重新生成的（不入库），手动改一次就会被覆盖，所以图标 / 启动画面 / 背景色 / 版本号全部落在 `android-pack/scripts/prepare-android.js` 里，并逐个断言覆盖的图片尺寸与模板原图一致 —— 缩放比例错了很难从截图上发现。③ **签名必须固定**：密钥由 Python `cryptography` 生成 PKCS12 存入仓库 Secret（不入库），`build.gradle` 里显式指定 `signingConfigs.debug`。早期版本把密钥放在 `~/.android/debug.keystore` 依赖 Gradle 对 `user.home` 的推断，CI 上推断不到会**静默退回自动生成的临时签名** —— APK 一切正常、badging 全对，只有对比证书指纹才发现，而后果是覆盖升级必被系统以「签名不符」拒绝（唯一绕过方式是卸载，会清掉 App 内数据）。现加断言「keystore 证书指纹 == APK 实际签名指纹」守住。④ **产物自检**：确认 APK 内含 `assets/public/index.html`（否则装上去是白屏），并从**编译后**的 badging 读包名 / 应用名 / 版本号 / 启动入口 —— aapt2 会重写资源名，按 `res/mipmap-*/ic_launcher.png` 这种原路径是查不到的（第一版自检就因此误报失败）。⑤ 发布到固定 tag `android-latest` + 固定文件名 `GameLife.apk`，下载链接永久不变 |
 | v1.7.2（工具链） | 2026-09-23 | **发布链路打通 + 校验工具三点增强**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— 线上跑的就是 v1.7.1 那份代码）。① **内置托管发布**：不依赖任何账号授权即可得到 https 地址，手机可直接打开（⚠ 内置托管会把名为 `dist` 的目录当构建产物**排除**，实测直接发布 `dist/` 得到**空站点**；故发布用另一个名字的目录，并给构建脚本加 `--mirror=<目录>`，自检通过后才镜像，一次完成、不留时间窗）。② **`browser-check.js` 加 `--url=<地址>`**：同一组断言跳过内置服务直接跑在**线上地址**上 —— 线上与本地至少有三处不同（真实域名的 MIME、缓存头、子路径与 HTTPS），恰好都是会导致「页面能看但离线失效」的地方。③ **新增 5 条离线能力断言**：实测 `sw.js` 的 MIME 是 JS 类型、Service Worker 真的注册并接管页面、缓存真的建立且装了资源（断言数 82 → **87**；此前只在源码里查过配置，没验过注册结果，而 `register('sw.js').catch(() => {})` 会把失败静默吞掉）。④ **修掉一处会掩盖真问题的偶发失败**：启动等待原为「readyState 完成 + 固定 2200ms」，跑远程（冷启动二十多个资源）会偶发踩空，`overallScore()` 内部读到 `undefined` 抛 TypeError → 脚本直接 `exit 1`，输出只剩一句没头没尾的「页面求值失败」，把真正的断言结果全盖掉；改为**轮询到 `GL.state.attributes` 就位**，并把那次调用单独 try 住，超时也继续往下测（打印启动诊断：缺哪些 `GL.*`、哪些脚本标签、几条页面异常） |
+| v1.7.4 | 2026-09-24 | **实机反馈三项修正**。① **去掉图标一圈黑边**：根因是 `icon.svg` 在紫色渐变块外面还套了一圈 `#0d0f1a` 近黑（本机看着像精致的深色描边，到启动器遮罩下就是一圈黑边），安卓自适应图标的 `background` 层更是直接用了 `#08090d`、`foreground` 层还是一张自带底色的**不透明**方图 —— 系统裁圆后圆内是近黑底 + 中间一块紫，必然露边。现改为**满铺紫色渐变 + 透明前景层**（只画闪电、收进中心安全区），legacy 图标（Android 7 及以下）同样改满铺 / 整圆；`apple-touch-icon` 改用满铺版（iOS 会自己套超椭圆遮罩，自带圆角会变成「圆角套圆角」且外圈易露异色边）。同时把图标生成**收敛到唯一入口** `tools/gen-icons.js`：一次写出 `icon.svg` + 4 张 Web PNG + 安卓 5 密度 × 3 张 PNG + 自适应图标 XML —— 两边同源，不会再"改了一边忘了另一边"；顺带修掉小尺寸被 `--window-size` 钳制的问题（DSF 由写死的 0.25 改为 `size/win`，窗口一律 ≥ 800px）。② **立绘下方读数精简**：原为三行（身高/体重/肌肉 · 发型/衣橱件数 · 今日饮水/距上次），窄屏上把立绘压得很碎，现只留**一行**「身高 / 体重 / 发型」—— 饮水在生理面板、衣橱在「体型与衣橱」面板都有完整视图，舞台注脚不必重复；随之删掉仅供它使用的 `todayMl()` / `lastDrink()`。③ **顶部固定预留系统状态栏**：**安卓的 WebView 与独立应用 `env(safe-area-inset-top)` 一律返回 0**，而系统状态栏照样占着最上面一条 → 页头被压住（APK 里尤其明显）；改为 `calc(var(--s4) + max(var(--sa-t), 30px))`，任何环境下都至少留 30px（≈安卓状态栏高度），末尾全屏那条规则再 +10px。verify-wiring 的「全屏留白兜底」断言同步放宽**写法**（原先只认 `var(--sa-t) … + … px` 的加法形式，`max()` 写法会被误判成没兜底；要求没变：必须同时出现安全区变量与固定 px）。browser-check 仍 **87 项全绿**（全屏层叠实测 `46px → 56px`）。sw 缓存升 v12 |

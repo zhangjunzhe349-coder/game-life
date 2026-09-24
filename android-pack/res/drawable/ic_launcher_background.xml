@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标的背景层：与 icon.svg 同一套紫色渐变。
+     早先这里是 #08090d 近黑 —— 系统把图标裁成圆形后，圆内是近黑底、中间一块紫色，
+     看起来就是「一圈黑边」（用户实机反馈）。改成渐变铺满后，
+     无论系统用圆、圆角方还是水滴形遮罩，边缘都不会再露出第二种颜色。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:startColor="#5B4DF0"
+        android:endColor="#8F7BFF"
+        android:type="linear" />
+</shape>
