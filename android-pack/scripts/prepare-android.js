@@ -59,12 +59,43 @@ let gradle = fs.readFileSync(gradlePath, 'utf8');
 if (!/versionCode\s+\d+/.test(gradle) || !/versionName\s+"[^"]*"/.test(gradle)) {
   fail('app/build.gradle 里找不到 versionCode / versionName，模板结构可能变了');
 }
-const before = gradle;
+
+const SIGNING = [
+  '    signingConfigs {',
+  '        // 固定签名。不固定的话，每次构建签名都不同，升级安装会被系统以「签名不符」',
+  '        // 拒绝，而唯一的绕过方式是先卸载 —— 那会把 App 内的数据一起清掉。',
+  '        // 密钥本身不入库，由 CI 从仓库 Secret 恢复到下面这个路径。',
+  '        // 刻意放在 android-pack/keystore/ 而不是 ~/.android/：后者依赖 Gradle 对',
+  '        // user.home 的推断，实测在 CI 上推断不到，会静默退回自动生成的临时签名',
+  '        // （产物看着完全正常，只有对比证书指纹才发现不是同一把）。',
+  '        debug {',
+  "            storeFile file('../../keystore/debug.keystore')",
+  "            storePassword 'android'",
+  "            keyAlias 'androiddebugkey'",
+  "            keyPassword 'android'",
+  '        }',
+  '    }',
+  '',
+].join('\n');
+
+let changed = false;
+const v1 = gradle;
 gradle = gradle
   .replace(/versionCode\s+\d+/, `versionCode ${versionCode}`)
   .replace(/versionName\s+"[^"]*"/, `versionName "${version}"`);
-if (gradle !== before) fs.writeFileSync(gradlePath, gradle);
+if (gradle !== v1) changed = true;
+
+if (!gradle.includes("storeFile file('../../keystore/debug.keystore')")) {
+  const anchor = '    buildTypes {';
+  if (!gradle.includes(anchor)) fail('app/build.gradle 里找不到 buildTypes 块，模板结构可能变了');
+  gradle = gradle.replace(anchor, SIGNING + anchor);
+  changed = true;
+}
+if (changed) fs.writeFileSync(gradlePath, gradle);
+
 console.log(`  ① 版本号    ${version} / versionCode ${versionCode}（由 APP_VERSION 派生）`);
+if (!gradle.includes('signingConfigs')) fail('签名配置没注入成功');
+console.log('  ①b 签名     signingConfigs.debug → android-pack/keystore/debug.keystore（显式指定，不靠约定）');
 
 /* ---------- ② 镜像覆盖 res/ ---------- */
 const files = walk(SRC_RES);

@@ -75,14 +75,17 @@ jobs:
         env:
           KS_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
         run: |
-          mkdir -p "$HOME/.android"
-          if [ -n "$KS_B64" ]; then
-            printf '%s' "$KS_B64" | base64 -d > "$HOME/.android/debug.keystore"
-            echo "已恢复固定签名：$(stat -c%s "$HOME/.android/debug.keystore") 字节"
-          else
-            echo "::warning::仓库未配置 ANDROID_DEBUG_KEYSTORE_B64，本次使用随机签名。"
-            echo "::warning::下次构建签名会变，升级安装会被系统拒绝（只能卸载重装，App 内数据会丢）。"
+          set -e
+          if [ -z "$KS_B64" ]; then
+            echo "::error::仓库未配置 ANDROID_DEBUG_KEYSTORE_B64。"
+            echo "::error::缺固定签名就无法保证以后能升级安装（只能卸载重装，App 内数据会丢），因此直接失败。"
+            exit 1
           fi
+          mkdir -p android-pack/keystore
+          printf '%s' "$KS_B64" | base64 -d > android-pack/keystore/debug.keystore
+          echo "已恢复签名文件：$(stat -c%s android-pack/keystore/debug.keystore) 字节"
+          keytool -list -v -keystore android-pack/keystore/debug.keystore -storepass android 2>/dev/null \
+            | grep -iE "^Alias name|SHA256:" | head -3
 
       - name: 准备 Android SDK
         run: |
@@ -142,7 +145,21 @@ jobs:
           grep -q "application-icon" /tmp/badging.txt || { echo "::error::APK 内没有启动器图标"; exit 1; }
           grep -q "launchable-activity" /tmp/badging.txt || { echo "::error::没有可启动的 Activity，装上去点不开"; exit 1; }
 
-          echo "版本 $VER · $((SIZE/1024/1024)) MB · 包名 / 应用名 / 图标 / 启动入口 全部校验通过"
+          # 签名必须就是仓库里那把固定密钥。这是「以后能直接覆盖升级、不用卸载清数据」
+          # 的唯一前提，而它一旦坏掉，从界面到 badging 全都看不出来 —— 只有对比
+          # 证书指纹才发现。实测踩过一次：签名文件放 ~/.android/ 时 Gradle 没认，
+          # 静默退回了临时生成的签名，APK 一切正常，只是升级安装必然失败。
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          KS_FP=$(keytool -list -v -keystore android-pack/keystore/debug.keystore -storepass android 2>/dev/null \
+                  | grep -iE "SHA256:" | head -1 | sed 's/.*SHA256[: ]*//' | tr -d ': \r' | tr 'A-F' 'a-f')
+          APK_FP=$("$APKSIGNER" verify --print-certs "$OUT" 2>/dev/null \
+                  | grep -iE "SHA-256 digest" | head -1 | awk '{print $NF}' | tr 'A-F' 'a-f')
+          echo "keystore 证书指纹：$KS_FP"
+          echo "APK 实际签名指纹：$APK_FP"
+          [ -n "$KS_FP" ] && [ -n "$APK_FP" ] || { echo "::error::取不到签名指纹，无法确认签的是哪把密钥"; exit 1; }
+          [ "$KS_FP" = "$APK_FP" ] || { echo "::error::APK 不是用仓库里的固定密钥签的，以后升级安装会被系统拒绝"; exit 1; }
+
+          echo "版本 $VER · $((SIZE/1024/1024)) MB · 包名 / 应用名 / 图标 / 启动入口 / 签名一致 全部校验通过"
           echo "path=$OUT" >> "$GITHUB_OUTPUT"
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
           echo "mb=$((SIZE/1024/1024))" >> "$GITHUB_OUTPUT"
