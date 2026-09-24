@@ -118,13 +118,31 @@ jobs:
           SIZE=$(stat -c%s "$OUT")
 
           # 网页资源必须真的打进了包里 —— 少了就是装上去白屏
+          # （assets/ 原样保留，可以按路径查）
           for f in assets/public/index.html assets/public/sw.js assets/public/js/app.js; do
             unzip -l "$OUT" | grep -q "$f" || { echo "::error::APK 内缺少 $f"; exit 1; }
           done
-          # 图标也必须在
-          unzip -l "$OUT" | grep -q "res/mipmap-xxxhdpi/ic_launcher.png" || { echo "::error::APK 内缺少启动器图标"; exit 1; }
 
-          echo "版本 $VER · $((SIZE/1024/1024)) MB · 内含网页资源与图标"
+          # 图标、包名、版本号必须从**编译后**的结果里读。
+          # 不能按路径找 res/mipmap-*/ic_launcher.png —— aapt2 会把资源名重写
+          # （png crunching 会改名合并），原路径在 APK 里根本不存在。
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)
+          if [ -z "$AAPT" ]; then echo "::error::找不到 aapt2（ANDROID_HOME=$ANDROID_HOME）"; exit 1; fi
+          "$AAPT" dump badging "$OUT" > /tmp/badging.txt
+          echo "--- 编译后的清单要点 ---"
+          head -1 /tmp/badging.txt
+          grep -m1 "application-label" /tmp/badging.txt || true
+          grep -m1 "application-icon-640" /tmp/badging.txt || grep -m1 "application-icon" /tmp/badging.txt || true
+          grep -m1 "launchable-activity" /tmp/badging.txt || true
+          echo "------------------------"
+
+          grep -q "package: name='com.jayzen.gamelife'" /tmp/badging.txt || { echo "::error::包名不是 com.jayzen.gamelife"; exit 1; }
+          grep -q "versionName='$VER'" /tmp/badging.txt || { echo "::error::APK 内版本号不是 $VER"; exit 1; }
+          grep -q "application-label:'Game Life'" /tmp/badging.txt || { echo "::error::应用名不是 Game Life"; exit 1; }
+          grep -q "application-icon" /tmp/badging.txt || { echo "::error::APK 内没有启动器图标"; exit 1; }
+          grep -q "launchable-activity" /tmp/badging.txt || { echo "::error::没有可启动的 Activity，装上去点不开"; exit 1; }
+
+          echo "版本 $VER · $((SIZE/1024/1024)) MB · 包名 / 应用名 / 图标 / 启动入口 全部校验通过"
           echo "path=$OUT" >> "$GITHUB_OUTPUT"
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
           echo "mb=$((SIZE/1024/1024))" >> "$GITHUB_OUTPUT"
