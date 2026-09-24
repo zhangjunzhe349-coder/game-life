@@ -1,6 +1,6 @@
 {
   "name": "game-life-android",
-  "version": "1.8.0",
+  "version": "1.7.1",
   "private": true,
   "description": "Game Life 的安卓打包壳。只负责把 dist/ 的纯净产物装进原生容器，不含任何业务逻辑。",
   "scripts": {

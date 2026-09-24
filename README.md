@@ -126,6 +126,58 @@ node tools/browser-check.js --url=https://<你的地址>/ --no-shot
 > iOS 必须用 **Safari** 添加（Chrome for iOS 走的是同一内核但入口不完整）。
 > 图标已经是 PNG（`apple-touch-icon.png` 180×180）—— iOS 不认 SVG，用 SVG 会显示成白块。
 
+### 打包成安卓 App（v1.7.3）
+
+**不是所有安卓浏览器都给 PWA 安装入口。** Chrome 从 108 版起取消了无条件的
+「添加到主屏幕」，只在判定「可安装」时才显示「安装应用」；而国产浏览器（UC、夸克、
+QQ，以及小米 / 华为 / OPPO / vivo 自带的那几个）基本不实现 PWA 安装 ——
+菜单里连这一项都没有。这种情况站点侧再完美也没用（可用 `tools/diag-installable.js`
+让浏览器自己说出原因）。
+
+于是走原生打包：`android-pack/` 是 Capacitor 壳，只负责把 `dist/` 的纯净产物装进
+原生容器，**业务代码一行不改**。本地不需要装 Android Studio / JDK / Android SDK，
+由 `.github/workflows/android.yml` 在 GitHub 的机器上出包。
+
+**取包**（固定链接，每次构建原地更新）：
+
+```
+https://github.com/zhangjunzhe349-coder/game-life/releases/download/android-latest/GameLife.apk
+```
+
+手机上装包要允许「安装未知来源应用」。仓库 Actions 页也能手动触发构建。
+
+APK 与 PWA 的差别：
+
+| | APK | PWA |
+|---|---|---|
+| 安装入口 | 系统装包，不受浏览器限制 | 取决于浏览器是否支持 |
+| 全屏 | 没有地址栏也没有浏览器 UI，状态栏保留 | 安卓可连状态栏一起去掉，iOS 不行 |
+| 离线 | 资源打包在应用内，天然离线，**不需要首次联网** | 靠 Service Worker 缓存，首次必须成功加载一次 |
+| 数据 | 应用私有存储，与浏览器 / 线上站点互不可见 | 绑 origin |
+
+#### 几个必须知道的点
+
+- **签名必须固定。** 密钥由 Python `cryptography` 生成 PKCS12，存在仓库 Secret
+  （`ANDROID_DEBUG_KEYSTORE_B64`），不入库、不公开。构建时会断言
+  「keystore 证书指纹 == APK 实际签名指纹」，不等就失败。理由是签名一变，覆盖升级
+  会被系统以「签名不符」拒绝，而唯一的绕过方式是卸载 —— 那会清掉 App 内的数据。
+  > 踩过一次：早期把密钥放在 `~/.android/debug.keystore`，依赖 Gradle 对 `user.home`
+  > 的推断，CI 上推断不到 → **静默退回了自动生成的临时签名**。产物一切正常、badging
+  > 全对，只有对比证书指纹才发现。所以现在改成在 `build.gradle` 里显式指定
+  > `signingConfigs.debug`，并加了指纹断言守住。
+- **定制全部落在 `android-pack/scripts/prepare-android.js`。** 因为 `android/` 是
+  `npx cap add android` 每次从模板重新生成的（不入库），手动改一次就会被覆盖。
+  它负责：换启动器图标（含自适应图标前景层）、换 11 张启动画面、改背景色、把版本号
+  从 `js/app.js` 的 `APP_VERSION` 派生（单一真值，不手写两份），并逐个断言覆盖的
+  图片尺寸与模板原图一致 —— 缩放比例错了很难从截图上发现。
+- **构建前会跑 `tools/build-dist.js`**，所以「源 `index.html` 带编辑器注入就拒绝构建」
+  那道闸门对打包同样生效。产物自检还会确认 APK 内确实含 `assets/public/index.html`
+  （否则装上去是白屏），并从**编译后**的 badging 读包名 / 应用名 / 版本号 / 启动入口
+  （aapt2 会重写资源名，按 `res/mipmap-*/ic_launcher.png` 这种原路径是查不到的）。
+- **包名 `com.jayzen.gamelife` 装上之后就不能改了** —— 改包名等于换一个 App，数据不通。
+- **上架应用商店需要换成正式签名**（密钥移入 Secrets、补 `signingConfigs.release`）。
+  现在的包是调试签名，只适合自己侧载。
+
 ### 全屏程度：安卓连状态栏一起去掉（v1.7.1）
 
 manifest 的 `display` 为 `fullscreen`、`display_override` 为 `["fullscreen", "standalone"]`：
@@ -205,7 +257,15 @@ game-life/
 ├── icon-maskable-512.png   # 自适应图标（内容缩到 80%，四周留给系统裁切）
 ├── apple-touch-icon.png    # iOS 主屏幕图标（Safari 不认 SVG，必须 PNG）
 ├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v11）
-└── manifest.webmanifest    # PWA 安装配置
+├── manifest.webmanifest    # PWA 安装配置
+├── tools/diag-installable.js     # 问浏览器「为什么没有安装入口」（CDP：getAppManifest / getInstallabilityErrors）
+├── .github/workflows/android.yml # 云端出 APK（本地不用装 Android Studio / JDK / Android SDK）
+└── android-pack/           # Capacitor 壳：把 dist/ 装进原生容器，不含业务逻辑
+    ├── capacitor.config.json     # 包名 com.jayzen.gamelife / 应用名 Game Life
+    ├── scripts/prepare-android.js # 可重放的定制：图标 / 启动画面 / 版本号 / 固定签名
+    │                              #   （android/ 由 cap add 每次重建，不入库）
+    ├── res/                # 覆盖进原生工程的安卓资源镜像（图标 15 + 启动画面 11 + 背景色）
+    └── keystore/           # 签名密钥不入库，由 CI 从仓库 Secret 恢复
 ```
 
 ## 属性与技能体系（v1.5.0 起，v1.6.0 补齐小字与编辑）
@@ -539,4 +599,5 @@ git stash && git checkout v1.1.0
 | v1.6.1 | 2026-09-21 | **生命刻度改为「列数由宽度算」**：不再固定「52 列 × 预期寿命行」（那是一年一行的竖长条，宽屏下格子被拉到 22px、整块 1850px 高）。改为**格子固定大小（4–14px 一档，绝不拉伸）、列数由容器宽度算出、行数是结果**，总格子数恒等于总周数。挑格子的规则是「整块高度 ≤ 520px 时取最大边长」，所以窗口变宽 → 列变多行变少 → 整块变矮，一生始终一眼看全。宽度余数均匀分摊到各列间距，恰好占满容器。**标尺改为按周序号定位**（行不再等于一年，「每 10 行标一次」失效）：第 age×52 周那格 = age 岁生日所在格 → 画白色内圈，左侧数字按该格所在行对齐；每 52 周画 1px 年度刻度，颜色按区域反转（琥珀底暗线、暗底亮线）。新增网格下方「排布读数」与 `GL.lifeGrid` 布局真值。browser-check 增至 66 项，新增「真改视口宽度看列数是否重排」+ 逐像素确认画到右缘。sw 缓存升 v9 |
 | v1.7.0 | 2026-09-22 | **离线与手机端完整化**。① **字体自托管**：原先引 Google Fonts，国内不可达且 `<link rel=stylesheet>` 是渲染阻塞资源会拖白首屏；现将 Chakra Petch / JetBrains Mono 各 3 个字重（共 95KB woff2）放进 `fonts/`，CSS 用 @font-face 引用，页面做到**零跨域请求**，断网也不退化字形。② **补 PNG 图标**：iOS 不认 SVG 的 apple-touch-icon（会显示白块），新增 192 / 512 / maskable-512 / 180 四个尺寸，并写了 `tools/gen-icons.js` —— 借本机 Chromium 无头渲染，不引入 sharp 之类依赖。③ **手机端补齐**：底部标签栏加 `env(safe-area-inset-bottom)` 避开 iPhone 手势条；`100dvh` 替代 `100vh`（手机上 100vh 含地址栏会裁掉底部内容）；窄屏卡片标题栏改竖排（横排时展示字体标题与等宽说明挤成一团）；生命统计块锁两列（否则「约 49 年」的「年」字被挤到下一行）；输入框字号提到 16px（低于 16px 时 iOS 聚焦会自动放大整页 —— 且选择器必须带 `#main` 提权，否则被 `.tx-field input` 盖掉，实测就漏过一次）。④ **`sw.js`**：删掉 Three.js 时代遗留的 CDN 分支，改为只接管同源资源，ASSETS 补齐 6 个字体与 5 个图标（v10）。⑤ **校验增强**：verify-wiring 补上「ASSETS / manifest 图标 / index.html 引用必须真实存在」与「不得再有 Google Fonts」（旧正则只认 js|css|html|svg|webmanifest，png 与 woff2 全部漏检）；browser-check 66 → **78 项**，新增**手机视口**整组断言（真机 390×844 / dpr3 下测布局、触摸目标、横向溢出、输入框字号，并以实际资源请求证明字体来源） |
 | v1.7.1 | 2026-09-23 | **安卓全屏启动**：`display` 由 `standalone` 改为 `fullscreen`，`display_override` 由 `["standalone","minimal-ui"]` 改为 `["fullscreen","standalone"]`（⚠ 浏览器**优先读 `display_override`**，只改 `display` 在安卓上不生效；列表里保留 `standalone` 是 iOS 的规范回落项）。全屏后系统状态栏消失、`env(safe-area-inset-top)` 归零，故新增 `@media (display-mode: fullscreen)` 的页头固定留白兜底。**顺带修掉一个潜伏 bug**：`--sa-t` 变量定义了却全仓无人引用 —— iOS 的 `black-translucent` 状态栏是浮在页面之上的，页头一直被时间/电量压着；现补进 `#main` 顶部内边距。校验：verify-wiring 增 3 条断言（`display` 与 `display_override` 必须成对为 fullscreen / 必须有 fullscreen 留白兜底 / `--sa-t` 必须被消费），browser-check 78 → **82 项**（不读源码：从部署产物的 CSSOM 取该规则，再用 CSSOM 临时解除媒体条件量**真实层叠结果** `16px → 26px`，证明它没被上面的 `padding` 简写盖掉）。sw 缓存升 v11 |
+| v1.7.3（打包） | 2026-09-24 | **安卓打包链路**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— APK 里跑的就是 v1.7.1 那份代码，所以 APK 的 versionName 也是 1.7.1）。起因：用户手机的自带浏览器菜单里没有安装入口。先用 `tools/diag-installable.js`（CDP 的 `Page.getAppManifest` + `Page.getInstallabilityErrors`，让浏览器自己说原因）确认站点侧完全合格 —— manifest 无解析错误、未报任何不可安装原因、SW 已激活并接管、缓存 23 项，判定问题在浏览器侧，改走原生打包。① 新增 `android-pack/`（Capacitor 8.5.2 壳）与 `.github/workflows/android.yml`，**本地不需要装 Android Studio / JDK / Android SDK**。② **定制必须可重放**：`android/` 是 `npx cap add android` 每次从模板重新生成的（不入库），手动改一次就会被覆盖，所以图标 / 启动画面 / 背景色 / 版本号全部落在 `android-pack/scripts/prepare-android.js` 里，并逐个断言覆盖的图片尺寸与模板原图一致 —— 缩放比例错了很难从截图上发现。③ **签名必须固定**：密钥由 Python `cryptography` 生成 PKCS12 存入仓库 Secret（不入库），`build.gradle` 里显式指定 `signingConfigs.debug`。早期版本把密钥放在 `~/.android/debug.keystore` 依赖 Gradle 对 `user.home` 的推断，CI 上推断不到会**静默退回自动生成的临时签名** —— APK 一切正常、badging 全对，只有对比证书指纹才发现，而后果是覆盖升级必被系统以「签名不符」拒绝（唯一绕过方式是卸载，会清掉 App 内数据）。现加断言「keystore 证书指纹 == APK 实际签名指纹」守住。④ **产物自检**：确认 APK 内含 `assets/public/index.html`（否则装上去是白屏），并从**编译后**的 badging 读包名 / 应用名 / 版本号 / 启动入口 —— aapt2 会重写资源名，按 `res/mipmap-*/ic_launcher.png` 这种原路径是查不到的（第一版自检就因此误报失败）。⑤ 发布到固定 tag `android-latest` + 固定文件名 `GameLife.apk`，下载链接永久不变 |
 | v1.7.2（工具链） | 2026-09-23 | **发布链路打通 + 校验工具三点增强**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— 线上跑的就是 v1.7.1 那份代码）。① **内置托管发布**：不依赖任何账号授权即可得到 https 地址，手机可直接打开（⚠ 内置托管会把名为 `dist` 的目录当构建产物**排除**，实测直接发布 `dist/` 得到**空站点**；故发布用另一个名字的目录，并给构建脚本加 `--mirror=<目录>`，自检通过后才镜像，一次完成、不留时间窗）。② **`browser-check.js` 加 `--url=<地址>`**：同一组断言跳过内置服务直接跑在**线上地址**上 —— 线上与本地至少有三处不同（真实域名的 MIME、缓存头、子路径与 HTTPS），恰好都是会导致「页面能看但离线失效」的地方。③ **新增 5 条离线能力断言**：实测 `sw.js` 的 MIME 是 JS 类型、Service Worker 真的注册并接管页面、缓存真的建立且装了资源（断言数 82 → **87**；此前只在源码里查过配置，没验过注册结果，而 `register('sw.js').catch(() => {})` 会把失败静默吞掉）。④ **修掉一处会掩盖真问题的偶发失败**：启动等待原为「readyState 完成 + 固定 2200ms」，跑远程（冷启动二十多个资源）会偶发踩空，`overallScore()` 内部读到 `undefined` 抛 TypeError → 脚本直接 `exit 1`，输出只剩一句没头没尾的「页面求值失败」，把真正的断言结果全盖掉；改为**轮询到 `GL.state.attributes` 就位**，并把那次调用单独 try 住，超时也继续往下测（打印启动诊断：缺哪些 `GL.*`、哪些脚本标签、几条页面异常） |
