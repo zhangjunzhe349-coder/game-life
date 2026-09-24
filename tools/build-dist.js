@@ -181,3 +181,29 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(`\n✅ dist/ 自给自足：清单齐全、引用全部落盘、无跨域依赖、无开发产物`);
+
+/* ---------- 可选：同步到「发布目录」----------
+   内置托管（workbuddy_sites_deploy）会把名为 dist 的目录当作构建产物排除 ——
+   实测直接发布 dist 得到的是空站点。所以发布要用另一个名字的目录，
+   用 --mirror=<绝对路径> 一次完成，免得手抄漏文件，更免得发布一份陈旧产物。
+   只在上面自检全部通过后才执行：绝不把不合格的产物镜像出去。 */
+const mirrorArg = (process.argv.find((a) => a.startsWith('--mirror=')) || '').slice(9);
+if (mirrorArg) {
+  const target = path.resolve(mirrorArg);
+  const refuse =
+    !mirrorArg.trim() || target === DIST || target === ROOT ||
+    ROOT.startsWith(target + path.sep);
+  if (refuse) {
+    console.log(`\n  ✗ --mirror 目标不合法（不能是 dist/ 本身、仓库根、或仓库的上级目录）：${target}`);
+    process.exit(1);
+  }
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.cpSync(DIST, target, { recursive: true });
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true })
+    .reduce((a, e) => a + (e.isDirectory() ? walk(path.join(d, e.name)) : 1), 0);
+  const n = walk(target);
+  const inj = (fs.readFileSync(path.join(target, 'index.html'), 'utf8').match(/data-page-node-id/g) || []).length;
+  console.log(`\n  ✅ 已同步到发布目录：${target}`);
+  console.log(`     ${n} 个文件 · index.html 注入 ${inj} 处${inj ? '（异常！）' : ''}`);
+  console.log('     发布方式：把该目录交给内置托管（别直接发布 dist/，会被当构建产物排除）');
+}

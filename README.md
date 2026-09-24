@@ -32,9 +32,32 @@ python -m http.server 8080
 
 ```bash
 cd game-life
+node tools/patch-index-mobile.js    # 先清编辑器注入（跑过浏览器/预览就会被重新注入）
 node tools/build-dist.js            # 产出 dist/：纯净运行时资源，约 460 KB
-node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是跑在源码上）
+node tools/browser-check.js --dist  # 把 87 项断言跑在产物上（不是跑在源码上）
 ```
+
+发布（内置托管，无需账号）：
+
+```bash
+node tools/build-dist.js --mirror="<发布目录绝对路径>"   # 构建 + 同步，一次完成
+```
+
+`--mirror` 存在的理由：内置托管会把名为 `dist` 的目录当作构建产物**排除** ——
+实测直接发布 `dist/` 得到的是**空站点**。所以发布要用另一个名字的目录（本项目用
+`../game-life-site`），用 `--mirror` 同步可避免手抄漏文件，也避免发布一份陈旧产物
+（镜像只在自检全部通过后才执行）。
+
+发布之后**一定要把同一组断言跑在线上地址上**（`--url` 会跳过内置服务直连）：
+
+```bash
+node tools/browser-check.js --url=https://<你的地址>/ --no-shot
+```
+
+线上与本地至少有三处不同，恰好都是会导致「页面能看但离线失效」的地方：
+**真实域名的 MIME**（`sw.js` 不是 JS 类型就静默注册失败）、**缓存头**、**子路径与 HTTPS**
+（PWA 作用域要求相对路径）。此外该模式会实测 Service Worker 是否真的注册并接管、
+缓存是否真的建立 —— 这是「载体能不能离线用」的唯一硬证据。
 
 `dist/` 与仓库是两份不同的东西：仓库里有 `tools/`（校验脚本 + 十几张调试截图）、`README.md`、`.git`，
 这些都不该出现在公网 URL 下。构建脚本会自检并**拒绝产出不合格的产物**：
@@ -65,7 +88,11 @@ node tools/browser-check.js --dist  # 把 78 项断言跑在产物上（不是�
 
 #### 各平台操作
 
-- **EdgeOne Pages（推荐）**：控制台新建项目 → 上传 `dist/` 目录，或连 GitHub 仓库自动构建。
+- **内置托管（本项目当前用它给手机访问）**：把 `--mirror` 出来的发布目录交给内置托管即可，
+  **无需任何账号授权**，即刻得到 https 地址。注意不要直接发布 `dist/`（会被当构建产物排除，发出空站点）。
+  - ✅ **本项目已上线（2026-09-23）**：<https://ef952b2677914127a1cb45d21a2ca93c.app.workbuddy.host>
+    —— 87 项断言已直接跑在该地址上验证通过（含 Service Worker 注册与缓存建立）。
+- **EdgeOne Pages（推荐用于长期/国内提速）**：控制台新建项目 → 上传 `dist/` 目录，或连 GitHub 仓库自动构建。
 - **Cloudflare Pages**：也可以把 `dist/` 直接拖进控制台（无需 Git）。用命令行则先 `npx wrangler login`，之后：
   ```bash
   npx wrangler pages deploy dist --project-name=game-life
@@ -162,9 +189,11 @@ game-life/
 ├── tools/verify-portrait.js # 无头图层校验：立绘 36 用例
 ├── tools/verify-wiring.js  # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / 资源存在性 / sw 版本
 ├── tools/verify-migrate.js # 数据迁移校验：v1 → v2 → v3（41 项断言，防丢历史/防改写原文小字）
-├── tools/browser-check.js  # 浏览器冒烟：桌面 + 手机视口 / 渲染断言 / 交互测试 / 面板明细 / 出 PNG
-│                            #   --dist 开关：整组断言改跑在部署产物 dist/ 上
+├── tools/browser-check.js  # 浏览器冒烟：桌面 + 手机视口 / 渲染断言 / 交互测试 / 离线能力 / 面板明细 / 出 PNG
+│                            #   --dist          整组断言改跑在部署产物 dist/ 上
+│                            #   --url=<地址>    改跑在线上地址上（不走内置服务，验真实 MIME/缓存头/HTTPS）
 ├── tools/build-dist.js     # 生成可部署的纯净 dist/（上线用；含产物自检与注入闸门）
+│                            #   --mirror=<目录> 自检通过后同步到发布目录（内置托管不接受名为 dist 的目录）
 ├── tools/gen-icons.js      # 由 icon.svg 生成各尺寸 PNG 图标（含 maskable 与 iOS 尺寸）
 ├── tools/patch-index-mobile.js # 给 index.html 打 PWA 资源补丁（幂等，顺带清除编辑器注入属性）
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
@@ -399,7 +428,14 @@ node tools/browser-check.js     # 动态：真跑页面 + 渲染断言 + 交互�
     断言侧栏确实变成 `position: fixed` 的底部标签栏、贴底悬浮、横向铺开、4 个页签触摸目标
     ≥ 44px、主区底部留白够高、**无横向溢出**、输入框字号 ≥ 16px
     （低于 16px 时 iOS 聚焦会自动放大整页）；并以**实际发出的资源请求**为证据，
-    断言字体只从本机加载、Google Fonts 请求数为 0。共 78 项。
+    断言字体只从本机加载、Google Fonts 请求数为 0。
+    **v1.7.1 补全屏与离线**：全屏那条不读源码，而是从部署产物的 CSSOM 取到 `@media (display-mode: fullscreen)`
+    规则、再临时解除其媒体条件量**真实层叠结果**（`16px → 26px → 还原 16px`），
+    验证它没被手机媒体查询里那条同为 `#main` 的 `padding` 简写盖掉；
+    离线那 5 条实测 `sw.js` 的 MIME 是不是 JS 类型、**Service Worker 真的注册并接管了页面**、
+    缓存真的建立且里面装了资源 —— 这是「装到主屏幕后能不能断网用」的唯一硬证据
+    （`app.js` 里 `register('sw.js').catch(() => {})` 会把注册失败静默吞掉）。
+    共 87 项，三种模式同一组断言：源码 / `--dist` 产物 / `--url=<线上地址>`。
     结尾还会打印**属性面板明细**（每组均值 + 每行「名称 数值」，负向标 `[-]`、双向标 `[~]`）——
     这不是断言，是给人眼的**地面真值**，缩略图上看错文案时以它为准。
   依赖 `ws`：装到仓库里（`npm i ws`），或 `NODE_PATH=<含 ws 的 node_modules 目录>` 指向已有的，
@@ -503,3 +539,4 @@ git stash && git checkout v1.1.0
 | v1.6.1 | 2026-09-21 | **生命刻度改为「列数由宽度算」**：不再固定「52 列 × 预期寿命行」（那是一年一行的竖长条，宽屏下格子被拉到 22px、整块 1850px 高）。改为**格子固定大小（4–14px 一档，绝不拉伸）、列数由容器宽度算出、行数是结果**，总格子数恒等于总周数。挑格子的规则是「整块高度 ≤ 520px 时取最大边长」，所以窗口变宽 → 列变多行变少 → 整块变矮，一生始终一眼看全。宽度余数均匀分摊到各列间距，恰好占满容器。**标尺改为按周序号定位**（行不再等于一年，「每 10 行标一次」失效）：第 age×52 周那格 = age 岁生日所在格 → 画白色内圈，左侧数字按该格所在行对齐；每 52 周画 1px 年度刻度，颜色按区域反转（琥珀底暗线、暗底亮线）。新增网格下方「排布读数」与 `GL.lifeGrid` 布局真值。browser-check 增至 66 项，新增「真改视口宽度看列数是否重排」+ 逐像素确认画到右缘。sw 缓存升 v9 |
 | v1.7.0 | 2026-09-22 | **离线与手机端完整化**。① **字体自托管**：原先引 Google Fonts，国内不可达且 `<link rel=stylesheet>` 是渲染阻塞资源会拖白首屏；现将 Chakra Petch / JetBrains Mono 各 3 个字重（共 95KB woff2）放进 `fonts/`，CSS 用 @font-face 引用，页面做到**零跨域请求**，断网也不退化字形。② **补 PNG 图标**：iOS 不认 SVG 的 apple-touch-icon（会显示白块），新增 192 / 512 / maskable-512 / 180 四个尺寸，并写了 `tools/gen-icons.js` —— 借本机 Chromium 无头渲染，不引入 sharp 之类依赖。③ **手机端补齐**：底部标签栏加 `env(safe-area-inset-bottom)` 避开 iPhone 手势条；`100dvh` 替代 `100vh`（手机上 100vh 含地址栏会裁掉底部内容）；窄屏卡片标题栏改竖排（横排时展示字体标题与等宽说明挤成一团）；生命统计块锁两列（否则「约 49 年」的「年」字被挤到下一行）；输入框字号提到 16px（低于 16px 时 iOS 聚焦会自动放大整页 —— 且选择器必须带 `#main` 提权，否则被 `.tx-field input` 盖掉，实测就漏过一次）。④ **`sw.js`**：删掉 Three.js 时代遗留的 CDN 分支，改为只接管同源资源，ASSETS 补齐 6 个字体与 5 个图标（v10）。⑤ **校验增强**：verify-wiring 补上「ASSETS / manifest 图标 / index.html 引用必须真实存在」与「不得再有 Google Fonts」（旧正则只认 js|css|html|svg|webmanifest，png 与 woff2 全部漏检）；browser-check 66 → **78 项**，新增**手机视口**整组断言（真机 390×844 / dpr3 下测布局、触摸目标、横向溢出、输入框字号，并以实际资源请求证明字体来源） |
 | v1.7.1 | 2026-09-23 | **安卓全屏启动**：`display` 由 `standalone` 改为 `fullscreen`，`display_override` 由 `["standalone","minimal-ui"]` 改为 `["fullscreen","standalone"]`（⚠ 浏览器**优先读 `display_override`**，只改 `display` 在安卓上不生效；列表里保留 `standalone` 是 iOS 的规范回落项）。全屏后系统状态栏消失、`env(safe-area-inset-top)` 归零，故新增 `@media (display-mode: fullscreen)` 的页头固定留白兜底。**顺带修掉一个潜伏 bug**：`--sa-t` 变量定义了却全仓无人引用 —— iOS 的 `black-translucent` 状态栏是浮在页面之上的，页头一直被时间/电量压着；现补进 `#main` 顶部内边距。校验：verify-wiring 增 3 条断言（`display` 与 `display_override` 必须成对为 fullscreen / 必须有 fullscreen 留白兜底 / `--sa-t` 必须被消费），browser-check 78 → **82 项**（不读源码：从部署产物的 CSSOM 取该规则，再用 CSSOM 临时解除媒体条件量**真实层叠结果** `16px → 26px`，证明它没被上面的 `padding` 简写盖掉）。sw 缓存升 v11 |
+| v1.7.2（工具链） | 2026-09-23 | **发布链路打通 + 校验工具三点增强**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— 线上跑的就是 v1.7.1 那份代码）。① **内置托管发布**：不依赖任何账号授权即可得到 https 地址，手机可直接打开（⚠ 内置托管会把名为 `dist` 的目录当构建产物**排除**，实测直接发布 `dist/` 得到**空站点**；故发布用另一个名字的目录，并给构建脚本加 `--mirror=<目录>`，自检通过后才镜像，一次完成、不留时间窗）。② **`browser-check.js` 加 `--url=<地址>`**：同一组断言跳过内置服务直接跑在**线上地址**上 —— 线上与本地至少有三处不同（真实域名的 MIME、缓存头、子路径与 HTTPS），恰好都是会导致「页面能看但离线失效」的地方。③ **新增 5 条离线能力断言**：实测 `sw.js` 的 MIME 是 JS 类型、Service Worker 真的注册并接管页面、缓存真的建立且装了资源（断言数 82 → **87**；此前只在源码里查过配置，没验过注册结果，而 `register('sw.js').catch(() => {})` 会把失败静默吞掉）。④ **修掉一处会掩盖真问题的偶发失败**：启动等待原为「readyState 完成 + 固定 2200ms」，跑远程（冷启动二十多个资源）会偶发踩空，`overallScore()` 内部读到 `undefined` 抛 TypeError → 脚本直接 `exit 1`，输出只剩一句没头没尾的「页面求值失败」，把真正的断言结果全盖掉；改为**轮询到 `GL.state.attributes` 就位**，并把那次调用单独 try 住，超时也继续往下测（打印启动诊断：缺哪些 `GL.*`、哪些脚本标签、几条页面异常） |

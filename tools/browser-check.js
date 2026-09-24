@@ -31,7 +31,13 @@ const ROOT = path.resolve(__dirname, '..');
      ① 动态拼接加载的资源（构建时扫不到）没进 dist；
      ② 某些文件被平台规则吃掉（如 GitHub Pages 的 Jekyll 会忽略下划线开头文件）。
    只有真起一个 http 服务把 dist/ 跑一遍，才算证明了「部署上去能用」。
-   用法：node tools/build-dist.js && node tools/browser-check.js --dist */
+   用法：node tools/build-dist.js && node tools/browser-check.js --dist
+   --url=<地址> 则跳过内置服务，直接把这同一组断言跑在**线上地址**上 ——
+     用来证明「部署出去的那份真的能用」，而不只是「本地产物能用」。
+     线上与本地至少有一处会不同：真实域名的 MIME / 缓存头 / 子路径 / HTTPS，
+     这些恰好都是会导致「页面能看但离线失效」的地方。 */
+const URL_ARG = (process.argv.find((a) => a.startsWith('--url=')) || '').slice(6);
+const URL_MODE = !!URL_ARG;
 const DIST_MODE = process.argv.includes('--dist');
 const SERVE = DIST_MODE ? path.join(ROOT, 'dist') : ROOT;
 const SRV_PORT = 8127;
@@ -46,6 +52,7 @@ const MIME = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
 };
 
+const closeSrv = () => { try { if (srv.listening) srv.close(); } catch (e) {} };
 const srv = http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split('?')[0]);
   if (p === '/') p = '/index.html';
@@ -102,7 +109,9 @@ function check(ok, label, detail) {
     process.exit(1);
   }
 
-  if (DIST_MODE) {
+  if (URL_MODE) {
+    console.log(`  模式：线上地址校验（${URL_ARG}）—— 不走内置服务\n`);
+  } else if (DIST_MODE) {
     if (!fs.existsSync(SERVE)) {
       console.error('✗ 找不到 dist/。先跑：node tools/build-dist.js');
       process.exit(1);
@@ -110,8 +119,8 @@ function check(ok, label, detail) {
     console.log(`  模式：部署产物校验（服务 ${path.relative(ROOT, SERVE)}/ 而不是仓库根）\n`);
   }
 
-  await new Promise((r) => srv.listen(SRV_PORT, '127.0.0.1', r));
-  const url = `http://127.0.0.1:${SRV_PORT}/index.html`;
+  if (!URL_MODE) await new Promise((r) => srv.listen(SRV_PORT, '127.0.0.1', r));
+  const url = URL_MODE ? URL_ARG : `http://127.0.0.1:${SRV_PORT}/index.html`;
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'glbrowser-'));
 
   const child = spawn(EXE, [
@@ -130,7 +139,7 @@ function check(ok, label, detail) {
     } catch (e) {}
     await new Promise((r) => setTimeout(r, 250));
   }
-  if (!target) { child.kill(); srv.close(); console.error('✗ CDP 未就绪'); process.exit(1); }
+  if (!target) { child.kill(); closeSrv(); console.error('✗ CDP 未就绪'); process.exit(1); }
 
   const ws = new WS(target.webSocketDebuggerUrl);
   const pageErrors = [];
@@ -161,6 +170,29 @@ function check(ok, label, detail) {
 
   await send('Runtime.enable'); await send('Log.enable'); await send('Page.enable');
   for (let i = 0; i < 60; i++) { if ((await ev('document.readyState')) === 'complete') break; await new Promise((r) => setTimeout(r, 200)); }
+
+  /* 等「应用真的启动完」，而不是睡一个固定秒数。
+     为什么必须这样：本机冷启动够快，固定等 2200ms 一直没事，但换成慢环境
+     （--url 跑远程、首次拉 20+ 个资源）就会偶发踩空 —— GL.state 还没建好，
+     而 overallScore() 内部要读 state.attributes，于是抛 TypeError。
+     那一抛会让脚本直接 exit 1，输出只有一句没头没尾的「页面求值失败」，
+     把真正的断言结果全盖掉（真问题反被噪声淹没）。
+     现在轮询到 state.attributes 就位为止；超时也不会崩，后续断言会以
+     「属性渲染 0 项」这类明确形式失败，并附上启动诊断。 */
+  let boot = null;
+  for (let i = 0; i < 60; i++) {
+    boot = await ev(`(() => {
+      const gl = window.GL || {};
+      return {
+        ready: document.readyState,
+        hasGL: !!window.GL,
+        hasState: !!gl.state,
+        attrs: ((gl.state && gl.state.attributes) || []).length,
+      };
+    })()`);
+    if (boot && !boot.__err && boot.hasState && boot.attrs > 0) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
   await new Promise((r) => setTimeout(r, 2200));
 
   const S = await ev(`(() => {
@@ -214,7 +246,9 @@ function check(ok, label, detail) {
       noteDiet: (gl.state && (gl.state.attributes.find((a) => a.id === 'diet') || {}).note) || null,
       nameSmalltalk: (gl.state && (gl.state.skills.find((s) => s.id === 'smalltalk') || {}).name) || null,
       subMuscle: (gl.state && (gl.state.skills.find((s) => s.id === 'muscle') || {}).sub) || null,
-      overall: typeof gl.overallScore === 'function' ? gl.overallScore() : null,
+      /* 单独 try 住：这一句以前能把整轮校验带走（页面没启动完时它内部读到
+         undefined 抛异常 → 整个求值表达式失败 → 脚本 exit 1，什么都没测到） */
+      overall: (() => { try { return typeof gl.overallScore === 'function' ? gl.overallScore() : null; } catch (e) { return null; } })(),
       attrCount: (gl.state && gl.state.attributes || []).length,
       skillCount: (gl.state && gl.state.skills || []).length,
       dataVersion: gl.state ? gl.state.version : null,
@@ -224,8 +258,25 @@ function check(ok, label, detail) {
 
   if (S && S.__err) {
     console.error('✗ 页面求值失败：' + S.__err);
-    ws.close(); child.kill(); srv.close();
+    ws.close(); child.kill(); closeSrv();
     process.exit(1);
+  }
+
+  /* 启动没完成时不静默：直接给出可定位的诊断（哪些脚本没上、GL.* 缺哪些、页面报了什么错） */
+  if (!(boot && boot.hasState && boot.attrs > 0)) {
+    console.error('⚠ 应用未在超时内启动完成 —— 启动诊断：' + JSON.stringify(boot));
+    const diag = await ev(`(() => {
+      const gl = window.GL || {};
+      const want = ['state', 'hooks', 'changed', 'save', 'load', 'attrLevelsFor', 'overallScore', 'lifeGrid', 'textEditBox', 'renderAvatarCtrl'];
+      return {
+        scriptTags: Array.from(document.querySelectorAll('script[src]')).map((s) => s.getAttribute('src')),
+        glKeys: Object.keys(gl).length,
+        missingGL: want.filter((k) => typeof gl[k] === 'undefined'),
+        readyState: document.readyState,
+      };
+    })()`);
+    console.error('  ' + JSON.stringify(diag));
+    console.error('  页面运行时异常 ' + pageErrors.length + ' 条：' + pageErrors.slice(0, 3).join(' | '));
   }
 
   /* ---------- 断言 ---------- */
@@ -589,6 +640,55 @@ function check(ok, label, detail) {
     }
   }
 
+  /* ---------- 离线能力（v1.7.1 补）：Service Worker 真的注册上了吗 ----------
+     为什么必须显式断言：SW 注册失败在 app.js 里是 register('sw.js').catch(() => {})
+     —— 失败被吞掉，页面照常打开、数据照常保存，**只是静默失去离线能力**，控制台都不闹。
+     历史上就这么翻过车（构建漏拷 sw.js，线上表现完全正常）。
+     期望的缓存名从仓库 sw.js 里读，避免把自己写死成一个会过期的字符串。 */
+  const expectCache = (() => {
+    try { return (fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8').match(/CACHE = '([^']+)'/) || [])[1] || null; }
+    catch (e) { return null; }
+  })();
+  const swInfo = await ev(`(async () => {
+    const out = { supported: 'serviceWorker' in navigator, regs: 0, ctrl: false, caches: [], swRes: null, swType: null, assets: 0 };
+    try {
+      if (out.supported) {
+        const rs = await navigator.serviceWorker.getRegistrations();
+        out.regs = rs.length;
+        out.ctrl = !!navigator.serviceWorker.controller;
+      }
+    } catch (e) { out.regErr = String(e); }
+    try { if (window.caches) out.caches = await caches.keys(); } catch (e) {}
+    try {
+      const r = await fetch('sw.js', { cache: 'no-store' });
+      out.swRes = r.status;
+      out.swType = r.headers.get('content-type');
+    } catch (e) { out.swErr = String(e); }
+    try {
+      const name = ${JSON.stringify(expectCache)};
+      if (name && window.caches && (await caches.keys()).includes(name)) {
+        out.assets = (await (await caches.open(name)).keys()).length;
+      }
+    } catch (e) {}
+    return out;
+  })()`);
+
+  if (swInfo && !swInfo.__err) {
+    check(swInfo.supported === true, '离线：浏览器支持 Service Worker');
+    check(swInfo.swRes === 200 && /javascript/i.test(swInfo.swType || ''),
+      '离线：sw.js 可达且 MIME 是 JS 类型（MIME 不对会静默注册失败）',
+      `HTTP ${swInfo.swRes} · ${swInfo.swType}`);
+    check(swInfo.regs >= 1 && swInfo.ctrl === true,
+      '离线：Service Worker 已注册并接管页面',
+      `注册 ${swInfo.regs} 个 · controller ${swInfo.ctrl}`);
+    check(!!expectCache && swInfo.caches.includes(expectCache),
+      `离线：缓存已建立（${expectCache}）`, `实际 [${swInfo.caches.join(', ') || '空'}]`);
+    check(swInfo.assets >= 20,
+      '离线：缓存里真的装了资源（断网可用）', `${swInfo.assets} 项`);
+  } else {
+    check(false, '离线：Service Worker 探测失败', (swInfo && swInfo.__err) || '未知');
+  }
+
   /* ---------- 手机视口（v1.7.0）：真机尺寸下布局与字体是否成立 ----------
      为什么必须单独测：桌面全绿不代表手机能用 —— 这一层测的是「视口变窄后那些媒体查询
      到底有没有生效」。用 CDP 把视口切成 iPhone 尺寸（390×844 / dpr 3 / mobile），
@@ -812,7 +912,7 @@ function check(ok, label, detail) {
   const bad = results.filter((r) => !r.ok);
   console.log('\n' + (bad.length ? `✗ 未通过（${bad.length}/${results.length}）` : `✅ 全部通过（${results.length} 项）`));
 
-  ws.close(); child.kill(); srv.close();
+  ws.close(); child.kill(); closeSrv();
   try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
   process.exit(bad.length ? 1 : 0);
 })().catch((e) => { console.error('browser-check 失败：', e); process.exit(1); });
