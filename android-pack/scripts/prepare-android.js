@@ -144,12 +144,16 @@ if (!/android:roundIcon="@mipmap\/ic_launcher_round"/.test(mf)) fail('AndroidMan
 {
   const bgPath = path.join(APP_RES, 'values', 'ic_launcher_background.xml');
   const bg = fs.readFileSync(bgPath, 'utf8');
-  /* ① 背景层的纯色兜底不能是模板的近黑 —— 系统遮罩裁圆后，圆内近黑 + 中间紫
-       看起来就是「紫块外面套一圈黑边」。 */
-  if (/#08090d/i.test(bg)) fail('自适应图标背景层仍是模板的近黑 #08090d —— 启动器遮罩下会露出黑边');
-  if (!/<color name="ic_launcher_background">#[0-9A-Fa-f]{6}<\/color>/.test(bg)) {
-    fail('读不到 ic_launcher_background 的颜色值 —— 模板结构变了，这条断言已经失去意义，需要重写');
-  }
+  /* ① 背景层的纯色兜底不能是近黑 —— 系统遮罩裁圆后，圆内近黑 + 中间紫
+       看起来就是「紫块外面套一圈黑边」。
+       ⚠ 必须**读颜色值**再判，不能在文件里 grep `#08090d`：那个字符串会出现在
+       注释里（写明「模板原值是 #08090d」），grep 会把注释当成实际取值 → 假失败。
+       第一次用 CI 跑就栽在这上面（步骤 10 直接失败）。凡是断言，就要断在取值上。 */
+  const bgM = bg.match(/<color name="ic_launcher_background">#([0-9A-Fa-f]{6})<\/color>/);
+  if (!bgM) fail('读不到 ic_launcher_background 的颜色值 —— 模板结构变了，这条断言已失去意义，需要重写');
+  const hex = bgM[1].toLowerCase();
+  const lum = parseInt(hex.slice(0, 2), 16) + parseInt(hex.slice(2, 4), 16) + parseInt(hex.slice(4, 6), 16);
+  if (lum < 150) fail(`自适应图标背景层是近黑 #${hex}（三通道和 ${lum} < 150）—— 启动器遮罩下会露出一圈黑边（模板原值就是 #08090d）`);
   /* ② 两处 anydpi XML 必须「背景层接紫色渐变 + 前景层接图标前景」。
        接错了（例如前景层指到 legacy 方图）就会把背景整块盖住。 */
   for (const f of ['ic_launcher.xml', 'ic_launcher_round.xml']) {
