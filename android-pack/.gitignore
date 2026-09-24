@@ -1,0 +1,15 @@
+# Capacitor 生成的原生工程：每次由 `npx cap add android` 从模板重建，
+# 不入库（否则仓库里躺着一整个 Gradle 工程，且每次升级 Capacitor 都会产生巨大 diff）。
+android/
+
+# 由 `cap sync` 从 ../dist 拷贝而来，不入库 —— dist/ 本身已是可重建的构建物
+www/
+
+node_modules/
+package-lock.json
+
+# 本地签名文件绝不入库（CI 用仓库 Secret 恢复）
+*.jks
+*.keystore
+*.p12
+!keystore/.gitkeep

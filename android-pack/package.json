@@ -1,0 +1,18 @@
+{
+  "name": "game-life-android",
+  "version": "1.8.0",
+  "private": true,
+  "description": "Game Life 的安卓打包壳。只负责把 dist/ 的纯净产物装进原生容器，不含任何业务逻辑。",
+  "scripts": {
+    "build:web": "cd .. && node tools/build-dist.js",
+    "add:android": "cap add android && node scripts/prepare-android.js",
+    "sync:android": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

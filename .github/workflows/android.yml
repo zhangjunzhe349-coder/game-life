@@ -1,0 +1,169 @@
+name: 构建安卓 APK
+
+# 产物：一个可以直接装到手机上的 APK。
+# 走云端构建的原因：本地出包要装 Android Studio + JDK + Android SDK（几个 GB），
+# 而 GitHub 的 runner 已经预装好这些，只需要写好流程。
+#
+# 签名说明：用固定的调试签名（存在仓库 Secret 里，不入库、不公开）。
+# 必须是固定签名 —— 否则每次构建签名都不同，想升级安装会因「签名不符」被系统拒绝，
+# 而唯一的绕过方式是先卸载，那会把 App 内复制的数据一起清掉。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android-pack/**'
+      - '.github/workflows/android.yml'
+      - 'js/**'
+      - 'css/**'
+      - 'index.html'
+      - 'sw.js'
+      - 'manifest.webmanifest'
+      - 'icon.svg'
+      - 'icon-*.png'
+      - 'apple-touch-icon.png'
+      - 'fonts/**'
+      - 'tools/build-dist.js'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Gradle 与 AGP 的依赖只跟着 Capacitor 版本变，缓存下来后续构建快很多
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android-pack/package.json', 'android-pack/capacitor.config.json') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # 这一步同时是闸门：源 index.html 带编辑器注入时，构建脚本会拒绝执行
+      - name: 构建纯净网页产物
+        run: node tools/build-dist.js
+
+      - name: 装打包依赖
+        working-directory: android-pack
+        run: npm install --no-audit --no-fund
+
+      - name: 恢复固定签名
+        env:
+          KS_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ -n "$KS_B64" ]; then
+            printf '%s' "$KS_B64" | base64 -d > "$HOME/.android/debug.keystore"
+            echo "已恢复固定签名：$(stat -c%s "$HOME/.android/debug.keystore") 字节"
+          else
+            echo "::warning::仓库未配置 ANDROID_DEBUG_KEYSTORE_B64，本次使用随机签名。"
+            echo "::warning::下次构建签名会变，升级安装会被系统拒绝（只能卸载重装，App 内数据会丢）。"
+          fi
+
+      - name: 准备 Android SDK
+        run: |
+          echo "SDK 位置：${ANDROID_HOME:-未设置}"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" > /dev/null 2>&1 || true
+
+      - name: 生成原生工程并定制
+        working-directory: android-pack
+        run: |
+          rm -rf android www
+          cp -r ../dist www
+          npx cap add android
+          node scripts/prepare-android.js
+          npx cap sync android
+
+      - name: 构建 APK
+        working-directory: android-pack/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: 取出 APK 并自检
+        id: apk
+        run: |
+          set -e
+          SRC=$(find android-pack/android/app/build/outputs/apk -name '*.apk' | head -1)
+          if [ -z "$SRC" ]; then echo "::error::没找到 APK 产物"; exit 1; fi
+
+          VER=$(grep -oE "APP_VERSION = '[^']+'" js/app.js | head -1 | cut -d"'" -f2)
+          OUT="android-pack/GameLife.apk"
+          cp "$SRC" "$OUT"
+          SIZE=$(stat -c%s "$OUT")
+
+          # 网页资源必须真的打进了包里 —— 少了就是装上去白屏
+          for f in assets/public/index.html assets/public/sw.js assets/public/js/app.js; do
+            unzip -l "$OUT" | grep -q "$f" || { echo "::error::APK 内缺少 $f"; exit 1; }
+          done
+          # 图标也必须在
+          unzip -l "$OUT" | grep -q "res/mipmap-xxxhdpi/ic_launcher.png" || { echo "::error::APK 内缺少启动器图标"; exit 1; }
+
+          echo "版本 $VER · $((SIZE/1024/1024)) MB · 内含网页资源与图标"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "mb=$((SIZE/1024/1024))" >> "$GITHUB_OUTPUT"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-life-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      # 用固定 tag 与固定文件名，下载链接就永久不变，不用每次重新找
+      - name: 发布下载链接
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          VER: ${{ steps.apk.outputs.ver }}
+          MB: ${{ steps.apk.outputs.mb }}
+        run: |
+          set -e
+          TAG=android-latest
+          TITLE="Game Life 安卓版 v$VER"
+          cat > /tmp/notes.md <<EOF
+          **直接下载下面的 \`Game Life.apk\`，在手机上点开安装即可。**
+
+          - 版本 v$VER · 约 $MB MB · 需要 Android 7.0 以上
+          - 不依赖任何浏览器，自带全屏，没有地址栏
+          - 完全离线：网页资源打包在应用内，不靠浏览器缓存
+          - 数据存在应用自己的存储里，与浏览器、线上站点那份互不可见（可导出/导入备份互通）
+
+          构建自提交 \`${GITHUB_SHA:0:7}\`
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK_PATH" --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file /tmp/notes.md
+          else
+            gh release create "$TAG" "$APK_PATH" --title "$TITLE" --notes-file /tmp/notes.md --latest=false
+          fi
+
+          echo "下载地址：https://github.com/${{ github.repository }}/releases/download/$TAG/GameLife.apk"

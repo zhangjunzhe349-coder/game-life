@@ -1,0 +1,13 @@
+{
+  "appId": "com.jayzen.gamelife",
+  "appName": "Game Life",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#08090d",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
