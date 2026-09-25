@@ -487,7 +487,7 @@ Service Worker 的换版链路（HTTP 缓存住 sw.js、新缓存装进旧文件
 - `verify-wiring.js`：补前者的盲区 —— 脚本顺序必须为
   `storage → avatar → portrait → physiology → attributes → skills → life → app`，
   16 个宿主节点齐全、`#portrait-svg` 的 `viewBox` 与画布一致、无 Three.js CDN 残留、
-  **每个模块调用的 `GL.*` 都有提供者**、缓存版本 ≥ v10。
+  **每个模块调用的 `GL.*` 都有提供者**、缓存版本 ≥ 脚本顶部 `MIN_SW_VER`（当前 13，与 `sw.js` 的 `CACHE` 同一轮递增）。
   v1.7.0 补上了三类**此前根本没被检查过**的东西（旧版收资源的正则只认
   `js|css|html|svg|webmanifest`，`.png` 与 `.woff2` 全部漏检）：
   **`ASSETS` 里引用的每个文件必须真实存在**（离线缺资源是静默失败 —— 不报错、不崩，
