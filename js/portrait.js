@@ -26,7 +26,49 @@
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
   function A() { return GL.state.avatar; }
-  function itemOf(id) { return (A().wardrobe || []).find((w) => w.id === id) || null; }
+
+  /* ---------- 照片试穿 ----------
+     电子衣橱里的单品是真实白底图（见 tools/build-wardrobe.py），
+     点穿上时会**把那张照片贴到立绘对应部位上**。
+     做法不是改绘制函数（那几个函数又长又绕，动了必出事），而是：
+       ① itemOf 对「要贴照片的槽位」返回一个**肤色副本** ——
+          矢量画的躯干 / 袖子 / 腿退成身体本身，照片边缘不会露出一圈色块；
+       ② 鞋子整个不画矢量版（鞋没有「身体」可言）；
+       ③ 最后统一贴一层 <image>，带投影，压掉「贴纸感」。
+     配饰（包 / 墨镜）不贴照片 —— 平铺的背包照贴到正面人身上不像话，
+     墨镜继续由矢量层画。 */
+  const PHOTO_SLOTS = { top: 1, bottom: 1 };
+
+  /* 照片要贴成多大：height 按身高比例、width 按鞋宽。
+     cy 取该部位在画布里的中点，dx 只有鞋用（左右脚分开）。 */
+  /* 尺寸是「主体外接框的高度」，不是画布高度。
+     上衣 305 → 主体宽 ≈290，约为肩宽(237)的 1.2 倍，接近真人穿衣的加宽量；
+     早先给到 350（1.4 倍）时肩膀被撑得像充气人。
+     下装给 470 是为了让它从腰(423)一直盖到踝(926)；
+     平铺裤照是分开腿拍的、天生偏宽，所以看起来是阔腿裤，这个改不掉。 */
+  const PHOTO_BOX = {
+    top:    { size: 305, cy: () => (Y.shoulder + Y.hip) / 2 },
+    bottom: { size: 470, cy: () => (Y.waist + Y.foot) / 2 - 6 },
+    shoes:  { size: 190, cy: () => Y.ankle + 20 }
+  };
+
+  function itemOf(id) {
+    const it = (A().wardrobe || []).find((w) => w.id === id) || null;
+    if (!it || !it.box || !PHOTO_SLOTS[it.slot]) return it;
+    /* 退成**该件衣服自己的压暗色**，不是肤色：
+       肤色会让露在照片外的胳膊 / 胯变成「裸体人台」，很难看；
+       压暗的衣色读者会直接理解成「同一件衣服的袖子 / 裤腿」，
+       照片边缘与矢量身体之间也就没有色差断层了。 */
+    return Object.assign({}, it, { color: shade(it.color, -0.42) });
+  }
+
+  /** 当前槽位已穿且有照片的单品（原始项，不是肤色副本） */
+  function photoOf(slot) {
+    const id = A().outfit[slot];
+    if (!id) return null;
+    const raw = (A().wardrobe || []).find((w) => w.id === id) || null;
+    return raw && raw.box ? raw : null;
+  }
 
   /* ============================================================
      工具：颜色
@@ -289,6 +331,8 @@
   function shoes(L, s) {
     const shoeItem = itemOf(A().outfit.shoes);
     if (!shoeItem) return;
+    /* 穿了有照片的鞋 → 矢量鞋整个让位，由 wearPhoto 那层贴真鞋 */
+    if (photoOf('shoes')) return;
     const c = shoeItem.color, dark = shade(c, -0.3), light = shade(c, 0.22);
     const legX = px(s.hipW * 0.52);
     const aR = px(s.ankleR);
@@ -810,17 +854,68 @@
   }
 
   /* ============================================================
+     照片试穿层：把真实衣服照片贴到对应部位
+     ------------------------------------------------------------
+     照片素材是 512×512 的正方画布，衣服主体居中（构建时已按类别归一）。
+     manifest 里的 box = 主体外接框 [x,y,w,h]，用它反推：
+       要让主体达到目标尺寸 size，整张画布该放大 k 倍、
+       该摆在哪个左上角，才能让「主体中心」落在 (cx, cy)。
+     ============================================================ */
+  function placePhoto(parent, it, cx, cy, size, byWidth) {
+    const S = 512;
+    const bx = it.box[0], by = it.box[1], bw = it.box[2], bh = it.box[3];
+    const k = size / (byWidth ? bw : bh);
+    const side = S * k;
+    el('image', {
+      href: it.img,
+      x: cx - (bx + bw / 2) * k,
+      y: cy - (by + bh / 2) * k,
+      width: side, height: side,
+      preserveAspectRatio: 'xMidYMid meet'
+    }, parent);
+  }
+
+  function wearPhoto(L, s) {
+    const legs = px(s.hipW * 0.52);      // 与 shoes() 同一套脚位算法
+    for (const slot of ['bottom', 'top']) {
+      const it = photoOf(slot);
+      const box = PHOTO_BOX[slot];
+      if (!it || !box) continue;
+      placePhoto(L, it, CX, box.cy(), box.size, false);
+    }
+    const sh = photoOf('shoes');
+    if (sh) {
+      for (const sx of [-legs, legs]) {
+        const cx = CX + sx;
+        /* 左脚镜像：素材是侧拍（鞋头朝右），左脚要朝左才自然 */
+        const g = sx < 0
+          ? el('g', { transform: `translate(${2 * cx},0) scale(-1,1)` }, L)
+          : L;
+        placePhoto(g, sh, cx, PHOTO_BOX.shoes.cy(), PHOTO_BOX.shoes.size, true);
+      }
+    }
+  }
+
+  /* ============================================================
      总装：按图层顺序绘制
      ============================================================ */
   function drawAll(svg) {
     const s = shape();
     while (svg.firstChild) svg.removeChild(svg.firstChild);
 
-    /* defs：全局渐变 + 轻微扫描纹理 */
+    /* defs：全局渐变 + 轻微扫描纹理 + 照片投影 */
     const defs = el('defs', null, svg);
     const lg = el('linearGradient', { id: 'pl-body', x1: '0', y1: '0', x2: '0.4', y2: '1' }, defs);
     el('stop', { offset: '0', 'stop-color': '#3ce8b0', 'stop-opacity': '0.16' }, lg);
     el('stop', { offset: '1', 'stop-color': '#3ce8b0', 'stop-opacity': '0' }, lg);
+    /* 照片投影：不加这一层，贴上去就是纯平「贴纸」，看不出是穿在身上。
+       区域用 objectBoundingBox 的小数（不是百分比）—— tools/verify-portrait.js
+       会把所有属性当数值校验，写成 '-25%' 会被判「非有限数」。 */
+    const fl = el('filter', { id: 'pl-photo', x: -0.3, y: -0.3, width: 1.6, height: 1.6 }, defs);
+    el('feDropShadow', {
+      dx: 0, dy: 7, stdDeviation: 8,
+      'flood-color': '#000000', 'flood-opacity': '0.55'
+    }, fl);
 
     const g = el('g', { 'shape-rendering': 'geometricPrecision' }, svg);
     ground(g, s);
@@ -832,6 +927,10 @@
     head(g, s);
     hairFront(g, s);
     accessory(g, s);
+
+    /* 照片试穿层：压在矢量之上、柔光罩之下，并统一挂投影滤镜 */
+    const photo = el('g', { filter: 'url(#pl-photo)' }, g);
+    wearPhoto(photo, s);
 
     /* 整幅轻微高光：自上而下的柔光罩 */
     el('rect', { x: 0, y: 0, width: 680, height: 1000, fill: 'url(#pl-body)', style: 'mix-blend-mode:screen' }, svg);

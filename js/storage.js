@@ -211,21 +211,16 @@
   };
 
   function defaults() {
-    const t1 = GL.uid(), b1 = GL.uid(), s1 = GL.uid(), g1 = GL.uid();
     return {
-      version: 3,
+      version: 4,
       ui: { attrCollapsed: [] },
       avatar: {
         height: 175, weight: 68, muscle: 50,
         skin: '#e8b088', hairStyle: 'short', hairColor: '#2b2118',
-        wardrobe: [
-          { id: t1, name: '白色T恤', slot: 'top', color: '#f5f5f0' },
-          { id: b1, name: '深蓝牛仔裤', slot: 'bottom', color: '#3a5a8c' },
-          { id: s1, name: '白色运动鞋', slot: 'shoes', color: '#e8e8e8' },
-          { id: g1, name: '黑框眼镜', slot: 'accessory', color: '#22222a', kind: 'glasses' }
-        ],
-        outfit: { top: t1, bottom: b1, shoes: s1, accessory: g1 },
-        outfits: []
+        wardrobe: wardrobeLib(),
+        outfit: { top: null, bottom: null, shoes: null, accessory: null },
+        outfits: [],
+        legacyWardrobe: []
       },
       physiology: {
         hydration: { cupSize: 250, goal: 2000, remindOn: false, remindMin: 90, logs: [] },
@@ -235,6 +230,15 @@
       skills: docSkills(),
       life: { birthDate: '1996-06-01', expectancy: 80 }
     };
+  }
+
+  /* 衣橱单品库来自构建产物 js/wardrobe-data.js（由 tools/build-wardrobe.py 生成）。
+     UI 只消费不硬编码 —— 加衣服 = 重跑那个脚本，不用改任何 JS。 */
+  function wardrobeLib() {
+    return (GL.WARDROBE_LIB || []).map((it) => ({
+      id: it.id, name: it.name, slot: it.slot, cat: it.cat,
+      color: it.color, box: it.box, img: it.img
+    }));
   }
 
   /* 深度合并缺失字段（版本升级兼容） */
@@ -309,6 +313,45 @@
     GL.state.version = 3;
   }
 
+  /* ============================================================
+     v3 → v4 迁移：衣橱从「色块占位」换成 41 件真实照片素材
+     ------------------------------------------------------------
+     v3（≤ v1.7.5）的衣橱是 defaults 里那 4 件**假单品**（白色T恤 / 深蓝牛仔裤 /
+     白色运动鞋 / 黑框眼镜）——只有 name + color，没有任何图片，
+     立绘只能拿 color 描个色块。用户 2026-09-26 原话：「之前你做这些其实都是不对的」，
+     要求换成他的真实白底图。
+
+     迁移规则（**不静默丢数据**）：
+       ① 内置占位项（名字在白名单里、且没有 box 字段）→ 丢弃
+       ② 用户自建的项（有名字但不在白名单）→ **不删**，原样搬进
+          avatar.legacyWardrobe 留档。它们没有图片、UI 里展示不了，
+          但也不该被悄悄抹掉。
+       ③ outfit 四个槽全部清空（旧 id 已失效，留着会指向不存在的单品）
+       ④ outfits（保存过的穿搭方案）保留名字，槽位 id 一并清空
+
+     迁移后衣柜是全新的一套；旧数据仍在 legacyWardrobe 里可查、可导出。
+     ============================================================ */
+  const V3_PLACEHOLDER_NAMES = ['白色T恤', '深蓝牛仔裤', '白色运动鞋', '黑框眼镜'];
+
+  function migrateV3toV4() {
+    const a = GL.state.avatar || (GL.state.avatar = {});
+    const old = Array.isArray(a.wardrobe) ? a.wardrobe : [];
+    const kept = old.filter((w) => w && w.name
+      && V3_PLACEHOLDER_NAMES.indexOf(w.name) === -1);
+    a.legacyWardrobe = kept;
+    if (kept.length) {
+      console.warn('[Game Life] 衣橱已换成照片素材库；旧的自建单品（无图）'
+        + '已留档到 avatar.legacyWardrobe，不再展示：', kept.map((w) => w.name).join('、'));
+    }
+    a.wardrobe = wardrobeLib();
+    a.outfit = { top: null, bottom: null, shoes: null, accessory: null };
+    a.outfits = (Array.isArray(a.outfits) ? a.outfits : []).map((o) => ({
+      id: o.id, name: o.name,
+      slots: { top: null, bottom: null, shoes: null, accessory: null }
+    }));
+    GL.state.version = 4;
+  }
+
   GL.load = function () {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(KEY)); } catch (e) { /* ignore */ }
@@ -319,6 +362,7 @@
       GL.state = merge(defaults(), data);
       if (prevVer < 2) migrateV1toV2(data);
       if (prevVer < 3) migrateV2toV3();
+      if (prevVer < 4) migrateV3toV4();
       if (!GL.state.ui || !Array.isArray(GL.state.ui.attrCollapsed)) GL.state.ui = { attrCollapsed: [] };
     }
     GL.save();

@@ -68,9 +68,17 @@
             <div class="stage-base" id="stage-base" aria-hidden="true"></div>
           </div>
           <div class="ctrl-toggle">
-            <button class="btn mini" id="ctrl-toggle" aria-expanded="false">🎚 体型与衣橱</button>
+            <button class="btn mini" id="ctrl-toggle" aria-expanded="false">👗 电子衣橱</button>
           </div>
-          <div id="avatar-ctrl" hidden></div>
+          <!-- 默认展示「电子衣橱」；体型参数收进第二个页签（用户要求：体型收起来） -->
+          <div id="avatar-panel" hidden>
+            <div class="ctrl-tabs" id="ctrl-tabs" role="tablist">
+              <button class="ctrl-tab on" data-view="wardrobe" type="button">👗 电子衣橱</button>
+              <button class="ctrl-tab" data-view="body" type="button">📏 体型</button>
+            </div>
+            <div id="wardrobe-ctrl"></div>
+            <div id="avatar-ctrl" hidden></div>
+          </div>
         </section>
 
         <!-- 右翼：生理状态 -->
@@ -88,8 +96,10 @@
 <div id="toast-box" aria-live="polite"></div>
 
 <script src="js/storage.js"></script>
+<script src="js/wardrobe-data.js"></script>
 <script src="js/avatar.js"></script>
 <script src="js/portrait.js"></script>
+<script src="js/wardrobe.js"></script>
 <script src="js/physiology.js"></script>
 <script src="js/attributes.js"></script>
 <script src="js/skills.js"></script>

@@ -17,7 +17,12 @@ const ok = [];
 const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
 const localScripts = scripts.filter((s) => !/^https?:/.test(s));
 
-const EXPECT = ['js/storage.js', 'js/avatar.js', 'js/portrait.js', 'js/physiology.js',
+/* wardrobe-data.js（构建产物）必须排在 storage.js **之后** ——
+   ① 它是裸 `GL.WARDROBE_LIB = …`，GL 由 storage.js 建（`const GL = window.GL = {}`），
+      排在前面会直接 ReferenceError: GL is not defined（v1.8.0 实测踩过）；
+   ② 反过来 storage.js 更不能排在它后面，那会把 window.GL 整个重置掉。 */
+const EXPECT = ['js/storage.js', 'js/wardrobe-data.js', 'js/avatar.js', 'js/portrait.js',
+  'js/wardrobe.js', 'js/physiology.js',
   'js/attributes.js', 'js/skills.js', 'js/life.js', 'js/app.js'];
 if (JSON.stringify(localScripts) !== JSON.stringify(EXPECT)) {
   problems.push(`脚本顺序不符\n    实际：${localScripts.join(' → ')}\n    期望：${EXPECT.join(' → ')}`);
@@ -186,7 +191,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 13;   // v1.7.5：图标前景层改透明 + SW 升级机制加固，资源有变必须 ≥ v13
+const MIN_SW_VER = 14;   // v1.8.0：电子衣橱照片版（新增 wardrobe-data.js / wardrobe.js / 立绘贴图），资源有变必须 ≥ v14
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

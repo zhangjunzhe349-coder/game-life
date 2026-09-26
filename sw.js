@@ -32,8 +32,13 @@
 
    改任何前端资源都必须升 CACHE 版本号，否则用户浏览器里的旧缓存会继续供应旧文件，
    表现为「我明明修好了，他打开还是坏的」。
+   v14 的改动（电子衣橱·照片版）：
+   ① 新增 js/wardrobe-data.js（41 件单品清单）与 js/wardrobe.js（衣橱界面），进预缓存。
+   ② **assets/wardrobe/ 的 41 张 WebP 故意不进 ASSETS** —— 829 KB 会给首次安装
+      平白加一大段等待。它们走 fetch 里那条「未命中就取真身并塞进缓存」的运行时缓存：
+      第一次翻开衣橱时按需下载，之后完全离线可用。
    ============================================================ */
-const CACHE = 'gamelife-v13';
+const CACHE = 'gamelife-v14';
 
 const ASSETS = [
   './',
@@ -54,9 +59,11 @@ const ASSETS = [
   'icon-maskable-512.png',
   'apple-touch-icon.png',
 
+  'js/wardrobe-data.js',
   'js/storage.js',
   'js/portrait.js',
   'js/avatar.js',
+  'js/wardrobe.js',
   'js/physiology.js',
   'js/attributes.js',
   'js/skills.js',

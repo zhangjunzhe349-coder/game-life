@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.7.5';
+  const APP_VERSION = '1.8.0';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 记录天数 ---------- */
@@ -76,17 +76,40 @@
     });
   }
 
-  /* ---------- 体型 / 衣橱折叠 ---------- */
+  /* ---------- 舞台下方折叠面板：电子衣橱 / 体型 ----------
+     默认展示「电子衣橱」（照片网格），体型参数收进第二个页签 ——
+     用户要求「体型收起来」，因为衣橱变成 41 张照片的网格后一面板放不下两件事。 */
   function initCtrlToggle() {
     const btn = document.getElementById('ctrl-toggle');
-    const box = document.getElementById('avatar-ctrl');
-    if (!btn || !box) return;
+    const panel = document.getElementById('avatar-panel');
+    const tabs = document.getElementById('ctrl-tabs');
+    if (!btn || !panel) return;
+
+    const views = {
+      wardrobe: document.getElementById('wardrobe-ctrl'),
+      body: document.getElementById('avatar-ctrl')
+    };
+
+    function show(name) {
+      Object.keys(views).forEach((k) => { if (views[k]) views[k].hidden = k !== name; });
+      if (tabs) tabs.querySelectorAll('.ctrl-tab').forEach((t) => {
+        t.classList.toggle('on', t.dataset.view === name);
+      });
+      if (name === 'body' && GL.renderAvatarCtrl) GL.renderAvatarCtrl();
+      if (name === 'wardrobe' && GL.renderWardrobe) GL.renderWardrobe();
+    }
+
     btn.addEventListener('click', () => {
-      const open = box.hidden;
-      box.hidden = !open;
+      const open = panel.hidden;
+      panel.hidden = !open;
       btn.setAttribute('aria-expanded', String(open));
-      btn.textContent = open ? '× 收起面板' : '🎚 体型与衣橱';
-      if (open) GL.renderAvatarCtrl && GL.renderAvatarCtrl();
+      btn.textContent = open ? '× 收起面板' : '👗 电子衣橱';
+      if (open) show('wardrobe');
+    });
+
+    if (tabs) tabs.addEventListener('click', (e) => {
+      const t = e.target.closest('.ctrl-tab');
+      if (t) show(t.dataset.view);
     });
   }
 

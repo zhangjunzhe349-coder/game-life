@@ -1,6 +1,6 @@
 # Game Life · 人生游戏面板
 
-把人生当成游戏来打：人物立绘 + 生理追踪 + 属性面板 + 技能成长 + 生命刻度。
+把人生当成游戏来打：人物立绘 + 电子衣橱 + 生理追踪 + 属性面板 + 技能成长 + 生命刻度。
 纯前端 PWA，数据存于本机 localStorage，无需登录、可离线、可安装到桌面。
 
 ## 运行
@@ -92,7 +92,7 @@ node tools/browser-check.js --url=https://<你的地址>/ --no-shot
 - **内置托管（本项目当前用它给手机访问）**：把 `--mirror` 出来的发布目录交给内置托管即可，
   **无需任何账号授权**，即刻得到 https 地址。注意不要直接发布 `dist/`（会被当构建产物排除，发出空站点）。
   - ✅ **本项目已上线（2026-09-23）**：<https://ef952b2677914127a1cb45d21a2ca93c.app.workbuddy.host>
-    —— 87 项断言已直接跑在该地址上验证通过（含 Service Worker 注册与缓存建立）。
+    —— 102 项断言已直接跑在该地址上验证通过（含 Service Worker 注册与缓存建立）。
 - **EdgeOne Pages（推荐用于长期/国内提速）**：控制台新建项目 → 上传 `dist/` 目录，或连 GitHub 仓库自动构建。
 - **Cloudflare Pages**：也可以把 `dist/` 直接拖进控制台（无需 Git）。用命令行则先 `npx wrangler login`，之后：
   ```bash
@@ -239,8 +239,10 @@ game-life/
 ├── index.html              # 结构：顶栏 HUD / 左翼属性 / 中央人物立绘 / 右翼生理 + 技能·生命·设置
 ├── css/style.css           # 设计令牌 + 组件 + 响应式 + 降级动效
 ├── js/storage.js           # 数据层：默认数据、技能篇预设、等级曲线、工具函数
+├── js/wardrobe-data.js     # 生成产物：41 件衣橱单品清单（GL.WARDROBE_LIB，由 build-wardrobe.py 写出）
 ├── js/portrait.js          # 分层 2D 立绘引擎（中央形象，纯 SVG 矢量绘制）
-├── js/avatar.js            # 体型参数 + 衣橱单品的控制面板（3D 渲染段已休眠）
+├── js/wardrobe.js          # 电子衣橱：左搭配框（上衣/下装/鞋·配饰）/ 右卡片网格 / 5 分类页签
+├── js/avatar.js            # 体型参数控制面板（页签另一半；3D 渲染段已休眠）
 ├── js/physiology.js        # 饮水 + 自定义生理指标（HUD 右翼）
 ├── js/attributes.js        # 自定义属性打分（HUD 左翼）
 ├── js/skills.js            # 技能经验值（＋ 手动加经验）
@@ -248,7 +250,7 @@ game-life/
 ├── js/app.js               # 入口：导航、顶栏读数、设置、启动流程
 ├── tools/verify-portrait.js # 无头图层校验：立绘 36 用例
 ├── tools/verify-wiring.js  # 接线校验：脚本清单 / GL.* 提供者 / 宿主节点 / 资源存在性 / sw 版本
-├── tools/verify-migrate.js # 数据迁移校验：v1 → v2 → v3（41 项断言，防丢历史/防改写原文小字）
+├── tools/verify-migrate.js # 数据迁移校验：v1 → v2 → v3 → v4（50 项断言，防丢历史/防改写原文小字/防丢自建项）
 ├── tools/browser-check.js  # 浏览器冒烟：桌面 + 手机视口 / 渲染断言 / 交互测试 / 离线能力 / 面板明细 / 出 PNG
 │                            #   --dist          整组断言改跑在部署产物 dist/ 上
 │                            #   --url=<地址>    改跑在线上地址上（不走内置服务，验真实 MIME/缓存头/HTTPS）
@@ -257,6 +259,7 @@ game-life/
 │                            #   --simulate-no-fix  负向验证：摘掉三处修复，断言必须失败
 ├── tools/build-dist.js     # 生成可部署的纯净 dist/（上线用；含产物自检与注入闸门）
 │                            #   --mirror=<目录> 自检通过后同步到发布目录（内置托管不接受名为 dist 的目录）
+├── tools/build-wardrobe.py # 衣橱素材唯一入口：41 张白底照 → 抠图/归一/仅鞋回正 → 透明 WebP + 清单
 ├── tools/gen-icons.js      # 图标唯一入口：内置 SVG 源 → icon.svg + Web 4 张 PNG
 │                            #   + 安卓 5 密度 × 3 张 PNG + 自适应图标 XML（两边同源，不会改一边忘一边）
 │                            #   前景层必须真透明（PNG colorType=6），有像素断言守着
@@ -264,12 +267,13 @@ game-life/
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
 ├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
 ├── fonts/                  # 自托管字体 6 个 woff2（离线可用，不依赖 Google Fonts）
+├── assets/wardrobe/        # 41 件单品透明 WebP（约 830KB，由 build-wardrobe.py 生成，走运行时缓存）
 ├── icon.svg                # 矢量图标（由 gen-icons.js 写出，与各 PNG 同源）
 ├── icon-192.png            # 安卓主屏幕图标 / 标签页 favicon
 ├── icon-512.png            # 高清图标 / 启动画面
 ├── icon-maskable-512.png   # 自适应图标（底色满铺、内容缩到 66%，四周留给系统裁切）
 ├── apple-touch-icon.png    # iOS 主屏幕图标（满铺版：iOS 会自己套一层超椭圆遮罩）
-├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v13）
+├── sw.js                   # Service Worker（离线缓存，v10 起只接管同源资源；当前 v14）
 ├── manifest.webmanifest    # PWA 安装配置
 ├── tools/diag-installable.js     # 问浏览器「为什么没有安装入口」（CDP：getAppManifest / getInstallabilityErrors）
 ├── .github/workflows/android.yml # 云端出 APK（本地不用装 Android Studio / JDK / Android SDK）
@@ -485,9 +489,10 @@ Service Worker 的换版链路（HTTP 缓存住 sw.js、新缓存装进旧文件
 - `verify-portrait.js`：无头 DOM 桩件跑一遍 `drawAll()`，检查坏值 `NaN/undefined`、
   路径语法、**填充路径必须 `Z` 闭合**（`fill: none` 的线稿豁免）、关键部位是否齐备。
 - `verify-wiring.js`：补前者的盲区 —— 脚本顺序必须为
-  `storage → avatar → portrait → physiology → attributes → skills → life → app`，
+  `storage → wardrobe-data → avatar → portrait → wardrobe → physiology → attributes → skills → life → app`
+  （`wardrobe-data.js` 必须在 `storage.js` **之后** —— `GL` 由 `storage.js` 建立；它若先跑就会 `GL is not defined` 整页挂），
   16 个宿主节点齐全、`#portrait-svg` 的 `viewBox` 与画布一致、无 Three.js CDN 残留、
-  **每个模块调用的 `GL.*` 都有提供者**、缓存版本 ≥ 脚本顶部 `MIN_SW_VER`（当前 13，与 `sw.js` 的 `CACHE` 同一轮递增）。
+  **每个模块调用的 `GL.*` 都有提供者**、缓存版本 ≥ 脚本顶部 `MIN_SW_VER`（当前 14，与 `sw.js` 的 `CACHE` 同一轮递增）。
   v1.7.0 补上了三类**此前根本没被检查过**的东西（旧版收资源的正则只认
   `js|css|html|svg|webmanifest`，`.png` 与 `.woff2` 全部漏检）：
   **`ASSETS` 里引用的每个文件必须真实存在**（离线缺资源是静默失败 —— 不报错、不崩，
@@ -520,7 +525,10 @@ Service Worker 的换版链路（HTTP 缓存住 sw.js、新缓存装进旧文件
     离线那 5 条实测 `sw.js` 的 MIME 是不是 JS 类型、**Service Worker 真的注册并接管了页面**、
     缓存真的建立且里面装了资源 —— 这是「装到主屏幕后能不能断网用」的唯一硬证据
     （`app.js` 里 `register('sw.js').catch(() => {})` 会把注册失败静默吞掉）。
-    共 87 项，三种模式同一组断言：源码 / `--dist` 产物 / `--url=<线上地址>`。
+    共 102 项，三种模式同一组断言：源码 / `--dist` 产物 / `--url=<线上地址>`。
+    **v1.8.0 补衣橱交互**：断言 41 张卡片全渲染、3 个搭配框存在、5 个分类页签可切、
+    点卡片后立绘真的贴上该件照片（比对 `<image>` 的 href 指向选中单品）、筛选与「脱下」都生效，
+    并把 `dataVersion` 断言提到 4。（面板在首屏之下，懒加载不解码 → 断言前先 `scrollIntoView`。）
     结尾还会打印**属性面板明细**（每组均值 + 每行「名称 数值」，负向标 `[-]`、双向标 `[~]`）——
     这不是断言，是给人眼的**地面真值**，缩略图上看错文案时以它为准。
   依赖 `ws`：装到仓库里（`npm i ws`），或 `NODE_PATH=<含 ws 的 node_modules 目录>` 指向已有的，
@@ -578,9 +586,40 @@ Service Worker 的换版链路（HTTP 缓存住 sw.js、新缓存装进旧文件
 
 `js/avatar.js` 保留完整的 3D 建模代码（`build()` / `surface()` / `hairGeo()` 等），
 但 `init()` 开头有 `if (typeof THREE === 'undefined') return;`，在无 Three.js 的环境下静默跳过。
-它现在只承担**体型参数 + 衣橱单品的控制面板**职责。
+它现在只承担**体型参数控制面板**职责（面板的另一个页签）。
 想回到 3D 版：`git checkout v1.3.0 -- .` 后重新提交（会一并恢复 Three.js CDN 与 index.html 的 canvas 节点）。
 `tools/verify-avatar.js`（32 用例）随之保留。
+
+## 电子衣橱（v1.8.0）
+
+从「色块占位」换成**真实白底照素材**。整条链路只有一个入口，重跑即可重放：
+
+```bash
+python tools/build-wardrobe.py            # 读 ../白底图/，写 assets/wardrobe/*.webp + js/wardrobe-data.js
+python tools/build-wardrobe.py --white    # 额外导出白底版（用于与透明版目检对比）
+```
+
+- **抠图**：四边 8 个种子点泛洪吃白（阈值 `WHITE_FLOOD=16`）→ `MedianFilter(3)` 去噪，
+  只保留最大连通块，边缘 1px 羽化，输出透明 WebP（质量 82，41 张共约 830KB）。
+- **归一**：裁到不透明外接矩形 → 按品类比例框（`BOXES`）缩放 → 居中放进 512×512 方画布。
+  「同类视觉大小一致」靠这一步：鞋统一占画面高度 58%、上衣 94%、下装 92%，所以 41 张卡片高矮一致、鞋看起来一样大。
+- **回正（只对鞋子）**：衣服裤子的最小外接矩形角**不稳**（#13 衬衫能判对 +21.5°，#30/#34/#35 会被拉歪），
+  实测用户拍摄的平铺照本就不歪，**强制回正反而会歪** —— 故 `DESKEW_SLOTS={'shoes'}` 只回正鞋子。
+  鞋先强制转横，再用 `sole_span()`（鞋底是直线 → 比较后半段上/下边缘 y 方差，小的一侧即鞋底）
+  判是否倒置，5 双全判对（含人眼易看错的 w40）。
+- **数据**：manifest 每条 `{id,name,slot,cat,color,box,img}`，`img` 是**字面量路径**
+  （不能运行时拼接 —— `build-dist.js` 扫描不到就会漏进产物，线上 404）。
+- **界面**：左「搭配框」三格（上衣 / 下装 / 鞋·配饰，v1.8.0 起鞋与配饰合并），右「卡片网格」+ 5 个分类页签
+  （全部 / 上衣 / 下装 / 鞋 / 配饰）。手机端（≤900px）左搭配 112px、右选择占满。
+  改搭配走 `paint()` 局部刷新（只重画搭配框与选中态 + 立绘），**不走 `GL.changed()`** ——
+  否则 41 张图会整页重解码闪一下。
+- **立绘贴照片**：`portrait.js` 里 `PHOTO_SLOTS={top,bottom}` 把选中的真实照片叠到纸娃娃对应位置
+  （带 `feDropShadow` 投影层）；照片外的胳膊/胯不能露肤色 —— 矢量层退成**该件衣色压暗**
+  （`shade(it.color,-0.42)`，读成同件衣袖）而不是肤色。鞋当左右脚两张贴（左脚镜像）。
+- **数据迁移 v3→v4**：内置占位四项（白T/牛仔裤/运动鞋/黑框眼镜）丢弃，
+  用户自建项留档到 `legacyWardrobe`（**绝不删用户数据**），`outfit` 清空。
+- 41 张 WebP **故意不进 `sw.js` 的 `ASSETS`**（体积大且非首屏必需），走运行时缓存；
+  但 `build-dist.js` 有硬闸：`assets/` 整棵树必须全进产物清单，否则拒绝构建。
 
 
 ## 设计定调（v1.2.0）
@@ -640,3 +679,4 @@ git stash && git checkout v1.1.0
 | v1.7.2（工具链） | 2026-09-23 | **发布链路打通 + 校验工具三点增强**（**运行时文件无任何改动**，故未升 `APP_VERSION`、未升 sw 缓存、未打 tag —— 线上跑的就是 v1.7.1 那份代码）。① **内置托管发布**：不依赖任何账号授权即可得到 https 地址，手机可直接打开（⚠ 内置托管会把名为 `dist` 的目录当构建产物**排除**，实测直接发布 `dist/` 得到**空站点**；故发布用另一个名字的目录，并给构建脚本加 `--mirror=<目录>`，自检通过后才镜像，一次完成、不留时间窗）。② **`browser-check.js` 加 `--url=<地址>`**：同一组断言跳过内置服务直接跑在**线上地址**上 —— 线上与本地至少有三处不同（真实域名的 MIME、缓存头、子路径与 HTTPS），恰好都是会导致「页面能看但离线失效」的地方。③ **新增 5 条离线能力断言**：实测 `sw.js` 的 MIME 是 JS 类型、Service Worker 真的注册并接管页面、缓存真的建立且装了资源（断言数 82 → **87**；此前只在源码里查过配置，没验过注册结果，而 `register('sw.js').catch(() => {})` 会把失败静默吞掉）。④ **修掉一处会掩盖真问题的偶发失败**：启动等待原为「readyState 完成 + 固定 2200ms」，跑远程（冷启动二十多个资源）会偶发踩空，`overallScore()` 内部读到 `undefined` 抛 TypeError → 脚本直接 `exit 1`，输出只剩一句没头没尾的「页面求值失败」，把真正的断言结果全盖掉；改为**轮询到 `GL.state.attributes` 就位**，并把那次调用单独 try 住，超时也继续往下测（打印启动诊断：缺哪些 `GL.*`、哪些脚本标签、几条页面异常） |
 | v1.7.4 | 2026-09-24 | **实机反馈三项修正**。① **去掉图标一圈黑边**：根因是 `icon.svg` 在紫色渐变块外面还套了一圈 `#0d0f1a` 近黑（本机看着像精致的深色描边，到启动器遮罩下就是一圈黑边），安卓自适应图标的 `background` 层更是直接用了 `#08090d`、`foreground` 层还是一张自带底色的**不透明**方图 —— 系统裁圆后圆内是近黑底 + 中间一块紫，必然露边。现改为**满铺紫色渐变 + 透明前景层**（只画闪电、收进中心安全区），legacy 图标（Android 7 及以下）同样改满铺 / 整圆；`apple-touch-icon` 改用满铺版（iOS 会自己套超椭圆遮罩，自带圆角会变成「圆角套圆角」且外圈易露异色边）。同时把图标生成**收敛到唯一入口** `tools/gen-icons.js`：一次写出 `icon.svg` + 4 张 Web PNG + 安卓 5 密度 × 3 张 PNG + 自适应图标 XML —— 两边同源，不会再"改了一边忘了另一边"；顺带修掉小尺寸被 `--window-size` 钳制的问题（DSF 由写死的 0.25 改为 `size/win`，窗口一律 ≥ 800px）。② **立绘下方读数精简**：原为三行（身高/体重/肌肉 · 发型/衣橱件数 · 今日饮水/距上次），窄屏上把立绘压得很碎，现只留**一行**「身高 / 体重 / 发型」—— 饮水在生理面板、衣橱在「体型与衣橱」面板都有完整视图，舞台注脚不必重复；随之删掉仅供它使用的 `todayMl()` / `lastDrink()`。③ **顶部固定预留系统状态栏**：**安卓的 WebView 与独立应用 `env(safe-area-inset-top)` 一律返回 0**，而系统状态栏照样占着最上面一条 → 页头被压住（APK 里尤其明显）；改为 `calc(var(--s4) + max(var(--sa-t), 30px))`，任何环境下都至少留 30px（≈安卓状态栏高度），末尾全屏那条规则再 +10px。verify-wiring 的「全屏留白兜底」断言同步放宽**写法**（原先只认 `var(--sa-t) … + … px` 的加法形式，`max()` 写法会被误判成没兜底；要求没变：必须同时出现安全区变量与固定 px）。browser-check 仍 **87 项全绿**（全屏层叠实测 `46px → 56px`）。sw 缓存升 v12 |
 | v1.7.5 | 2026-09-24 | **修「装了新版却什么都没变」**（v1.7.4 上线后的实机反馈：装上新 APK，只有图标变了、界面一律是老样子）。四层校验全绿、APK 拆包也确认是新代码 —— 问题整条都在**换版链路上**，四层校验一层都覆盖不到，为此新增第五层 `tools/test-update-flow.js`。四个成因，逐个修：① **sw.js 自己也被 HTTP 缓存住**（GitHub Pages / 内网都会给 max-age），更新检查拿到旧字节就认定「没有新版」→ `register('sw.js', { updateViaCache: 'none' })` + 每次打开 `reg.update()`。② **装缓存时 `cache.add(u)` 默认走 HTTP 缓存**，手里留着旧副本时新缓存里装的仍是旧文件（版本号变了、内容没变）→ 改 `cache.add(new Request(url, { cache: 'reload' }))` 强制取真身。③ **换版后没人刷页面**：旧 SW 是缓存优先，会把旧 `index.html` / 旧 `app.js` 一直供下去 → **页面侧**监听 `controllerchange` 自刷一次（只在本来就有 controller 时挂，`reloadedForUpdate` 兜底，无刷新循环）。④ **顺带抓到一个自造的死锁**：把 `Client.navigate()` 放进 `activate` 的 `waitUntil` 里必然挂死 —— 本 SW 在 activate 落地前**不处理 fetch**，而 navigate 触发的正是同源导航请求，实测挂 37 秒后报 `Cannot navigate to URL`；同一形状的坑还有把 `await self.skipWaiting()` 写进 `install`（`skipWaiting()` 的 promise 要等激活才 resolve，而激活又要等 install 结束 —— 一 await 就是新版永远升不上去，且**新缓存已经建出来了**，从 `caches.keys()` 看像是装成功了）。现在 SW 侧只留延迟一拍的兜底 navigate（救「页面上跑的还是没有 `controllerchange` 监听的旧代码」那一次）。**第五层怎么测**：用 `git show HEAD~1` 取旧版 `sw.js` / `app.js` / `style.css` 起站、让浏览器把旧缓存吃满（= 用户手里那台机器），再同端口同 profile 换成新产物、**只打开一次**，断言看到新版且应用启动完好、读数 1 行、顶部留白变大、缓存已换代、只刷新一次；`--simulate-no-fix` 把三处修复全摘掉做负向验证（缺了它这就是一张橡皮图章）。sw 缓存升 v13 |
+| v1.8.0 | 2026-09-26 | **电子衣橱·照片版**。用户给了 41 张衣服平铺白底照，要求「展示全部 / 简单搭配 / 出现在虚拟试穿上」。① **素材链路收敛到唯一入口** `tools/build-wardrobe.py`（读 `../白底图/`）：四边泛洪抠白（`WHITE_FLOOD=16`）+ `MedianFilter(3)` 去噪 → 按品类比例框归一（鞋占画面高 58%、上衣 94%、下装 92%，**故同类视觉大小一致**）→ 输出 41 张透明 WebP（质量 82，共约 830KB）+ `js/wardrobe-data.js`。② **回正只做鞋子**：用户明确「衣服裤子不许回正，回正反而歪」，实测最小外接矩形对有机形状不稳（#13 衬衫判对 +21.5°，#30/#34/#35 被拉歪），故 `DESKEW_SLOTS={'shoes'}`；鞋先用 `sole_span()`（鞋底是直线 → 比较后半段上/下边缘 y 方差，小侧为底）判倒正，5 双全对（含人眼易看错的 w40）。③ **界面**：点「👗 电子衣橱」展开面板，左搭配框三格（上衣 / 下装 / **鞋·配饰合一**）、右卡片网格 + 5 分类页签（全部/上衣/下装/鞋/配饰）；手机端左搭配 112px、右选择占满；改搭配走 `paint()` 局部刷新（不走 `GL.changed()`，否则 41 张图整页重解码闪一下）。④ **立绘穿真实衣服**（用户拍板「新页面 + 立绘都要穿」）：`portrait.js` 把选中照片叠到纸娃娃（`feDropShadow` 投影）；照片外的胳膊/胯**退成该件衣色压暗**（`shade(color,-0.42)`）而非肤色，避免裸体人台。⑤ **数据迁移 v3→v4**：内置占位四项丢弃、**用户自建项留档 `legacyWardrobe`**（绝不删）、`outfit` 清空。⑥ **产物完整性加硬闸**：41 张图走运行时缓存（不进 `sw` ASSETS），但 `build-dist.js` 强制 `assets/` 整棵树进产物清单，否则拒绝构建（此前的坑：图片路径运行时拼接 → 扫不到 → 线上 404）。校验：verify-migrate 41 → **50 项**（新增 v3→v4 衣橱迁移用例），browser-check 87 → **102 项**（新增衣橱 41 卡片/3 搭配框/5 页签/真贴图/筛选/脱下 + `dataVersion===4`），五层全绿，第五层 **v1.7.5 → v1.8.0 一次打开即新版**通过。sw 缓存升 v14 |

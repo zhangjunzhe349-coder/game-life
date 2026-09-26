@@ -27,6 +27,12 @@ function boot() {
   const window = {};
   const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'storage.js'), 'utf8');
   new Function('window', 'document', 'localStorage', src)(window, document, localStorage);
+  /* 单品库是构建产物（tools/build-wardrobe.py → js/wardrobe-data.js）。
+     storage.js 的 defaults() 在 load() 时才读它，所以在 load() 之前塞进 window.GL 即可。
+     注意必须用参数把 GL 传进去：wardrobe-data.js 开头就是裸 `GL.WARDROBE_LIB = …`，
+     在 new Function 的函数体里裸 GL 是解析不到的。 */
+  const lib = fs.readFileSync(path.join(__dirname, '..', 'js', 'wardrobe-data.js'), 'utf8');
+  new Function('window', 'GL', lib)(window, window.GL);
   return { GL: window.GL, store, localStorage };
 }
 
@@ -62,7 +68,7 @@ const v1State = {
 
   check(A.attributes.length === 14, '全新：属性 14 项', '实际 ' + A.attributes.length);
   check(A.skills.length === 13, '全新：技能 13 项', '实际 ' + A.skills.length);
-  check(A.version === 3, '全新：version = 3', '实际 ' + A.version);
+  check(A.version === 4, '全新：version = 4', '实际 ' + A.version);
 
   const groups = [...new Set(A.attributes.map((a) => a.group))];
   check(groups.length === 3 && groups.includes('physio') && groups.includes('mental') && groups.includes('entropy'),
@@ -104,7 +110,7 @@ const v1State = {
 
   check(A.attributes.length === 14, '迁移：属性换为 14 项新体系', '实际 ' + A.attributes.length);
   check(A.skills.length === 13, '迁移：技能换为 13 项新体系', '实际 ' + A.skills.length);
-  check(A.version === 3, '迁移：version 升到 3');
+  check(A.version === 4, '迁移：version 升到 4');
 
   // 同语义的技能经验必须保住
   const writing = A.skills.find((s) => s.id === 'writing');
@@ -138,7 +144,7 @@ const v1State = {
 
   // 二次加载不应重复迁移（幂等）
   GL.load();
-  check(GL.state.attributes.length === 14 && GL.state.version === 3,
+  check(GL.state.attributes.length === 14 && GL.state.version === 4,
     '迁移：重复 load 幂等（不会叠加）', '属性 ' + GL.state.attributes.length + ' 项');
 }
 
@@ -170,7 +176,7 @@ const v1State = {
   const attr = (id) => B.attributes.find((a) => a.id === id);
   const skill = (id) => B.skills.find((s) => s.id === id);
 
-  check(B.version === 3, '还原：version 升到 3', '实际 ' + B.version);
+  check(B.version === 4, '还原：version 升到 4', '实际 ' + B.version);
 
   check(attr('move').sub === '（活动半径）（久坐值）',
     '还原：运动度小字 = 原文「（活动半径）（久坐值）」', '实际 ' + attr('move').sub);
@@ -209,6 +215,72 @@ const v1State = {
   GL.load();
   const after = JSON.stringify(GL.state.attributes.map((a) => [a.id, a.sub, a.note]));
   check(before === after, '还原：重复 load 幂等（小字不会被二次改写）');
+}
+
+/* ============ 用例 5：v3 → v4 衣橱换成真实照片素材 ============
+   v3 的衣橱是 defaults 里那 4 件**假单品**（只有 color、没有图）。
+   用户 2026-09-26 要求整体换成他的 41 件白底图。
+   这里守两条线：
+     ① 内置占位项必须被换掉，且换成的是 41 件、每件都带 color + box；
+     ② **用户自建的单品绝不能静默消失** —— 要留档到 avatar.legacyWardrobe。 */
+const v3State = {
+  version: 3,
+  avatar: {
+    height: 175, weight: 68, muscle: 50,
+    skin: '#e8b088', hairStyle: 'short', hairColor: '#2b2118',
+    wardrobe: [
+      { id: 't1', name: '白色T恤', slot: 'top', color: '#f5f5f0' },
+      { id: 'b1', name: '深蓝牛仔裤', slot: 'bottom', color: '#3a5a8c' },
+      { id: 's1', name: '白色运动鞋', slot: 'shoes', color: '#e8e8e8' },
+      { id: 'g1', name: '黑框眼镜', slot: 'accessory', color: '#22222a', kind: 'glasses' },
+      { id: 'u1', name: '我自己加的外套', slot: 'top', color: '#123456' },
+    ],
+    outfit: { top: 't1', bottom: 'b1', shoes: 's1', accessory: 'g1' },
+    outfits: [{ id: 'o1', name: '上班那套', slots: { top: 't1', bottom: 'b1', shoes: null, accessory: null } }],
+  },
+  physiology: { hydration: { cupSize: 250, goal: 2000, remindOn: false, remindMin: 90, logs: [] }, fields: [] },
+  attributes: [], skills: [],
+  life: { birthDate: '1996-06-01', expectancy: 80 },
+};
+
+{
+  const { GL, store } = boot();
+  store['gamelife_state_v1'] = JSON.stringify(v3State);
+  GL.load();
+  const A = GL.state;
+
+  check(A.version === 4, '衣橱：version 升到 4', '实际 ' + A.version);
+  check(A.avatar.wardrobe.length === 41, '衣橱：换成 41 件照片素材', '实际 ' + A.avatar.wardrobe.length);
+  check(A.avatar.wardrobe.every((w) => w.color && Array.isArray(w.box) && w.box.length === 4),
+    '衣橱：每件都带 color 与 box（立绘贴图要用）');
+  check(A.avatar.wardrobe.filter((w) => w.slot === 'top').length === 24
+    && A.avatar.wardrobe.filter((w) => w.slot === 'bottom').length === 8
+    && A.avatar.wardrobe.filter((w) => w.slot === 'shoes').length === 5
+    && A.avatar.wardrobe.filter((w) => w.slot === 'accessory').length === 4,
+    '衣橱：分类数量 24/8/5/4（上/下/鞋/配饰）');
+
+  const placeholderLeft = A.avatar.wardrobe.filter((w) => w.name === '白色T恤' || w.name === '黑框眼镜');
+  check(placeholderLeft.length === 0, '衣橱：旧的 4 件占位单品已移除',
+    '实际残留 ' + placeholderLeft.length);
+
+  check(A.avatar.outfit.top === null && A.avatar.outfit.bottom === null
+    && A.avatar.outfit.shoes === null && A.avatar.outfit.accessory === null,
+    '衣橱：outfit 四个槽位已清空（旧 id 已失效）');
+
+  check(A.avatar.legacyWardrobe.length === 1
+    && A.avatar.legacyWardrobe[0].name === '我自己加的外套',
+    '衣橱：用户自建单品留档到 legacyWardrobe，没有静默删除',
+    '实际 ' + A.avatar.legacyWardrobe.map((w) => w.name).join('、'));
+
+  check(A.avatar.outfits.length === 1 && A.avatar.outfits[0].name === '上班那套'
+    && A.avatar.outfits[0].slots.top === null,
+    '衣橱：穿搭方案保住名字、清掉失效槽位');
+
+  // 幂等：第二次 load 不能再搬一遍，也不能把留档清掉
+  GL.load();
+  check(GL.state.version === 4 && GL.state.avatar.wardrobe.length === 41
+    && GL.state.avatar.legacyWardrobe.length === 1,
+    '衣橱：重复 load 幂等（不会二次迁移、留档不丢）');
 }
 
 /* ============ 输出 ============ */

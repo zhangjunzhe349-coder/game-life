@@ -252,6 +252,15 @@ function check(ok, label, detail) {
       attrCount: (gl.state && gl.state.attributes || []).length,
       skillCount: (gl.state && gl.state.skills || []).length,
       dataVersion: gl.state ? gl.state.version : null,
+      /* v1.8.0 电子衣橱：卡片 / 搭配框 / 分类页签 / 单品库 */
+      wrLib: (window.GL.WARDROBE_LIB || []).length,
+      wrCards: document.querySelectorAll('.wr-card').length,
+      wrSlots: document.querySelectorAll('.wr-slot').length,
+      wrCats: document.querySelectorAll('.wr-cat').length,
+      wrFirstImg: (() => {
+        const i = document.querySelector('.wr-card img');
+        return i ? i.naturalWidth : -1;
+      })(),
       firstGroupMean: document.querySelector('.ag-mean') ? document.querySelector('.ag-mean').textContent : null,
     };
   })()`.replace('__ERRS__', JSON.stringify(pageErrors)));
@@ -293,10 +302,84 @@ function check(ok, label, detail) {
   check(S.docH > 900, '页面有正常内容高度', `${S.docH}px`);
   check(S.cardCount >= 5, '卡片已渲染', `${S.cardCount} 张`);
 
+  /* ---------- 电子衣橱（v1.8.0 照片版）----------
+     静态检查全都看不出「页面能看、点不动」，所以这一段**必须真点一遍**：
+     点卡片 → 状态变 → 立绘上真的多出一张照片 → 再点一次能脱下 → 分类筛选生效。 */
+  check(S.wrLib === 41, '衣橱：单品库 41 件', `实际 ${S.wrLib}`);
+  check(S.wrCards === 41, '衣橱：41 件全部渲染成卡片', `实际 ${S.wrCards}`);
+  check(S.wrSlots === 3, '衣橱：搭配框 3 格（上衣 / 下装 / 鞋·配饰）', `实际 ${S.wrSlots}`);
+  check(S.wrCats === 5, '衣橱：分类页签 5 个', `实际 ${S.wrCats}`);
+
+  const wr = await ev(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const panel = document.getElementById('avatar-panel');
+    if (panel) panel.hidden = false;
+    /* 卡片图是 loading="lazy"：面板在首屏之下，不滚过去浏览器就永远不解码。
+       这不是 bug，是懒加载该有的样子 —— 校验得模拟「用户滚下去看衣橱」这件事。 */
+    const ctrl = document.getElementById('wardrobe-ctrl');
+    if (ctrl && ctrl.scrollIntoView) ctrl.scrollIntoView({ block: 'start' });
+    await sleep(700);
+    const photoN = () => document.querySelectorAll('#portrait-svg image').length;
+    const imgs = Array.from(document.querySelectorAll('.wr-card img'));
+    const res = {
+      imgTotal: imgs.length,
+      /* 卡片图是 loading="lazy" 的，只有进了视口才解码 —— 所以数「已解码」的，
+         不要盯着第一张（它可能正好在滚动容器外，永远 naturalWidth 0） */
+      imgOk: imgs.filter((i) => i.complete && i.naturalWidth > 0).length,
+      imgW: (imgs.find((i) => i.naturalWidth > 0) || {}).naturalWidth || 0,
+      p0: photoN()
+    };
+
+    const hit = async (id) => {
+      const c = document.querySelector('.wr-card[data-item="' + id + '"]');
+      if (!c) return false;
+      c.click(); await sleep(260); return true;
+    };
+    res.hitTop = await hit('w01');
+    res.p1 = photoN();
+    res.hitBottom = await hit('w07');
+    res.p2 = photoN();
+    res.hitShoes = await hit('w38');
+    res.p3 = photoN();
+    res.state = JSON.parse(JSON.stringify(window.GL.state.avatar.outfit));
+    res.on = document.querySelectorAll('.wr-card.on').length;
+    res.wearTxt = (document.querySelector('.wr-slot.has .wr-wear') || {}).textContent || '';
+
+    await hit('w38');                        // 再点一次 → 脱下
+    res.pOff = photoN();
+    await hit('w38');                        // 再穿上，留给后面的截图
+
+    const c2 = document.querySelector('.wr-cat[data-cat="bottom"]');
+    if (c2) { c2.click(); await sleep(200); }
+    res.nBottom = document.querySelectorAll('.wr-card').length;
+    const c1 = document.querySelector('.wr-cat[data-cat="all"]');
+    if (c1) { c1.click(); await sleep(200); }
+    res.nAll = document.querySelectorAll('.wr-card').length;
+    return res;
+  })()`);
+
+  check(wr && wr.imgOk > 0 && wr.imgW === 512,
+    '衣橱：卡片图片真的解码出来了（assets/wardrobe/*.webp 路径与格式正确）',
+    wr ? `已解码 ${wr.imgOk}/${wr.imgTotal} 张 · 首张 ${wr.imgW}px` : '无');
+  check(wr && wr.p0 === 0, '衣橱：开局立绘上没有照片层', `实际 ${wr && wr.p0}`);
+  check(wr && wr.p1 === 1, '衣橱：点上衣 → 立绘贴出 1 张照片', `实际 ${wr && wr.p1}`);
+  check(wr && wr.p2 === 2, '衣橱：再加下装 → 2 张', `实际 ${wr && wr.p2}`);
+  /* 鞋是左右两只各贴一张（左脚镜像），所以上装+下装+鞋 = 4 张 */
+  check(wr && wr.p3 === 4, '衣橱：再加鞋 → 4 张（鞋左右各一张）', `实际 ${wr && wr.p3}`);
+  check(wr && wr.state && wr.state.top === 'w01' && wr.state.bottom === 'w07' && wr.state.shoes === 'w38',
+    '衣橱：点击真的写进了 GL.state.avatar.outfit（不是只改了个样式）',
+    wr && wr.state ? JSON.stringify(wr.state) : '无');
+  check(wr && wr.on === 3, '衣橱：已穿的 3 件有选中高亮', `实际 ${wr && wr.on}`);
+  check(wr && wr.wearTxt.indexOf('棕色羽绒服') !== -1,
+    '衣橱：搭配框显示当前单品名', wr ? JSON.stringify(wr.wearTxt) : '');
+  check(wr && wr.pOff === 2, '衣橱：再点一次能脱下（照片层同步减少）', `实际 ${wr && wr.pOff}`);
+  check(wr && wr.nBottom === 8, '衣橱：筛选「下装」得 8 件', `实际 ${wr && wr.nBottom}`);
+  check(wr && wr.nAll === 41, '衣橱：切回「全部」恢复 41 件', `实际 ${wr && wr.nAll}`);
+
   /* ---------- 属性分组体系（v1.5.0） ---------- */
   check(S.attrCount === 14, '属性共 14 项（3 大类）', `实际 ${S.attrCount}`);
   check(S.skillCount === 13, '技能共 13 项（5 大类）', `实际 ${S.skillCount}`);
-  check(S.dataVersion === 3, '数据版本为 v3（迁移已完成）', `实际 v${S.dataVersion}`);
+  check(S.dataVersion === 4, '数据版本为 v4（衣橱照片版迁移已完成）', `实际 v${S.dataVersion}`);
   check(S.attrGroups === 3, '属性面板渲染 3 个分组', `实际 ${S.attrGroups} —— 为 0 说明属性面板没渲染`);
   check(S.attrRows === 14, '属性面板渲染 14 行细刻度', `实际 ${S.attrRows}`);
   check(S.attrNegGroups === 1, '熵值组带负向标记（.ag.neg）', `实际 ${S.attrNegGroups}`);
@@ -322,6 +405,21 @@ function check(ok, label, detail) {
   /* ---------- 出图 ---------- */
   let shotPaths = [];
   if (WANT_SHOT) {
+    /* 电子衣橱面板单独出图：这是这一版的主角，必须能一眼看到搭配框 + 卡片网格。
+       （顺带把懒加载的卡片图滚进视口，前面那条「已解码 N/41」的断言也靠它。） */
+    await ev(`(() => {
+      const el = document.getElementById('wardrobe-ctrl');
+      if (el) el.scrollIntoView({ block: 'start' });
+      return true;
+    })()`);
+    await new Promise((r) => setTimeout(r, 1000));
+    const sw0 = await send('Page.captureScreenshot', { format: 'png' });
+    const pw0 = path.join(ROOT, 'tools', 'browser-shot-wardrobe.png');
+    fs.writeFileSync(pw0, Buffer.from(sw0.data, 'base64'));
+    shotPaths.push(pw0);
+
+    await ev(`window.scrollTo({ top: 0 })`);
+    await new Promise((r) => setTimeout(r, 400));
     const s1 = await send('Page.captureScreenshot', { format: 'png' });
     const p1 = path.join(ROOT, 'tools', 'browser-shot-full.png');
     fs.writeFileSync(p1, Buffer.from(s1.data, 'base64'));

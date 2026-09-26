@@ -60,6 +60,30 @@ for (const rel of jsRefs) if (!files.includes(rel)) files.push(rel);
 
 const uniq = [...new Set(files)];
 
+/* ---------- 1c. 硬闸：assets/ 整棵树必须全在产物清单里 ----------
+   v1.8.0 踩过的坑：电子衣橱的图片路径原来是运行时拼的
+   （'assets/wardrobe/' + id + '.webp'），上面那条「扫 JS 字面量」的规则看不见它 ——
+   dist/ 里一张图都没有、线上全部 404，而 verify-portrait / verify-wiring /
+   verify-migrate 三层以及 build-dist 自己**全是绿的**，是 headless 校验报
+   「已解码 0/41 张」才暴露。图片裂了不会报错，属于最阴的一类失败。
+   => 不靠「猜哪些被引用」，直接把 assets/ 当目录整体校验。 */
+const ASSET_ROOT = path.join(ROOT, 'assets');
+if (fs.existsSync(ASSET_ROOT)) {
+  const walkAll = (d, base) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+    const rel = base + '/' + e.name;
+    return e.isDirectory() ? walkAll(path.join(d, e.name), rel) : [rel];
+  });
+  const inTree = walkAll(ASSET_ROOT, 'assets');
+  const notIncluded = inTree.filter((r) => !uniq.includes(r));
+  if (notIncluded.length) {
+    console.error(`❌ assets/ 里有 ${notIncluded.length} / ${inTree.length} 个文件没进产物清单，拒绝构建。`);
+    notIncluded.slice(0, 5).forEach((r) => console.error('     ' + r));
+    console.error('   dist/ 缺图 = 线上全 404，且静态校验发现不了。');
+    console.error('   多半是图片路径由 JS 拼接、build-dist 扫不到 —— 改成写进清单的字面量路径。');
+    process.exit(1);
+  }
+}
+
 /* ---------- 2. 清空并重建 dist/ ---------- */
 if (fs.existsSync(DIST)) fs.rmSync(DIST, { recursive: true, force: true });
 fs.mkdirSync(DIST, { recursive: true });
