@@ -263,6 +263,8 @@ game-life/
 ├── tools/gen-icons.js      # 图标唯一入口：内置 SVG 源 → icon.svg + Web 4 张 PNG
 │                            #   + 安卓 5 密度 × 3 张 PNG + 自适应图标 XML（两边同源，不会改一边忘一边）
 │                            #   前景层必须真透明（PNG colorType=6），有像素断言守着
+├── tools/push-via-api.js   # github.com 被墙时改走 api.github.com 推送（逐字节复刻提交，远程 SHA 与本地一致不分叉）
+│                            #   --dry-run 只看不推 · --repo=owner/name · --branch=main；只做快进，不覆盖远程
 ├── tools/patch-index-mobile.js # 给 index.html 打 PWA 资源补丁（幂等，顺带清除编辑器注入属性）
 ├── tools/render-preview.js # 把立绘落成 SVG+PNG，供单独检查比例
 ├── tools/verify-avatar.js  # 无头几何校验（v1.3.0 3D 版，保留）
