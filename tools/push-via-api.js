@@ -14,6 +14,26 @@
  *   node tools/push-via-api.js --repo=owner/name --branch=main      # 换仓库/分支
  *
  * 退出码：0 = 已同步或推送成功；1 = 失败（含「远程有本地没有的提交」这类必须人工介入的情况）。
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 五个坑（2026-09-27 首次编写时逐个踩出来的）。它们的症状**全都是同一句话** ——
+ * 「tree 一致、commit 不一致」。SHA 对不上时照这张表逐条查：
+ *
+ * 1. `git diff --raw` 给的 blob sha 是**缩写**（7 位），必须 `git rev-parse` 展开成
+ *    40 位再和 API 返回值比，否则永远「blob 不一致」。
+ * 2. `git cat-file commit` 头部的 author/committer 时间是 **epoch + 时区**
+ *    （`1790490599 +0800`），而 API 要 ISO 8601 → 用 `git show -s --format=%aI`。
+ * 3. blob 内容**必须取自 `git cat-file blob`，绝不能读工作区文件** —— 磁盘上是 CRLF、
+ *    git 里存的是 LF，读工作区会传出不同字节，tree 立刻对不上。
+ * 4. 读提交/标签**对象原文**的取值函数不许带 `.trim()` —— 它会把消息末尾换行吃掉，
+ *    而 GitHub 是逐字节拿 message 算 SHA 的。代码里为此单列了 `gitRaw()`。
+ * 5. **author 与 committer 的时间是两个字段，不能共用**（`%aI` / `%cI`）。
+ *    `git commit --amend` / rebase / cherry-pick 都会刷新 committer 时间而与 author 不同，
+ *    拿 author 时间填 committer，SHA 必然对不上。
+ *
+ * ⚠ 附带一条操作纪律：**已经推上去的提交不要再 amend**（改消息也不行 —— 新 SHA 与远程
+ * 不再有快进关系，本工具会拒绝推送）。要改说明就新开一个提交，或把内容写进代码注释。
+ * ═══════════════════════════════════════════════════════════════════════════
  */
 'use strict';
 const { execSync } = require('child_process');
