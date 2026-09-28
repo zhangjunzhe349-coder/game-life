@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.8.0';
+  const APP_VERSION = '1.8.1';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 记录天数 ---------- */
@@ -34,23 +34,6 @@
       <div class="readout"><b>${avg}<i>/100</i></b><span>状态均值</span></div>`;
   }
 
-  /* ---------- 舞台底部读数 ---------- */
-  /* 只留「体型 + 发型」。
-     原本这里是三行：身高/体重/肌肉、发型/衣橱件数、今日饮水/距上次。
-     窄屏上三行读数把立绘压得很碎（用户反馈"很乱"），而且信息本就在别处有完整视图：
-     饮水在生理面板、衣橱在「体型与衣橱」面板、肌肉量在属性/生理里。
-     这里作为舞台的注脚，只保留一眼能核对体型的两项 + 发型即可。 */
-  function renderStageBase() {
-    const el = document.getElementById('stage-base');
-    if (!el) return;
-    const a = GL.state.avatar;
-    const style = HAIR_NAMES[a.hairStyle] || a.hairStyle;
-    el.innerHTML = `
-      <span>身高 <b>${a.height}</b>cm · 体重 <b>${a.weight}</b>kg · 发型 <b>${style}</b></span>`;
-  }
-
-  const HAIR_NAMES = { short: '短发', buzz: '寸头', long: '长发', ponytail: '马尾', bald: '光头' };
-
   /* ---------- 入场序列 ---------- */
   function reveal(scope) {
     const els = (scope || document).querySelectorAll('.rv');
@@ -76,40 +59,21 @@
     });
   }
 
-  /* ---------- 舞台下方折叠面板：电子衣橱 / 体型 ----------
-     默认展示「电子衣橱」（照片网格），体型参数收进第二个页签 ——
-     用户要求「体型收起来」，因为衣橱变成 41 张照片的网格后一面板放不下两件事。 */
+  /* ---------- 舞台下方折叠面板：电子衣橱 ----------
+     v1.8.1 起中央立绘移除，衣橱面板不再嵌在中间栏（那样只有 300px 宽，
+     41 张卡片的网格展不开），改为整宽块。原来的「体型」第二个页签也一并去掉 ——
+     体型参数已变成顶部那条「个人信息」，不必再占衣橱面板的空间。 */
   function initCtrlToggle() {
     const btn = document.getElementById('ctrl-toggle');
     const panel = document.getElementById('avatar-panel');
-    const tabs = document.getElementById('ctrl-tabs');
     if (!btn || !panel) return;
-
-    const views = {
-      wardrobe: document.getElementById('wardrobe-ctrl'),
-      body: document.getElementById('avatar-ctrl')
-    };
-
-    function show(name) {
-      Object.keys(views).forEach((k) => { if (views[k]) views[k].hidden = k !== name; });
-      if (tabs) tabs.querySelectorAll('.ctrl-tab').forEach((t) => {
-        t.classList.toggle('on', t.dataset.view === name);
-      });
-      if (name === 'body' && GL.renderAvatarCtrl) GL.renderAvatarCtrl();
-      if (name === 'wardrobe' && GL.renderWardrobe) GL.renderWardrobe();
-    }
 
     btn.addEventListener('click', () => {
       const open = panel.hidden;
       panel.hidden = !open;
       btn.setAttribute('aria-expanded', String(open));
-      btn.textContent = open ? '× 收起面板' : '👗 电子衣橱';
-      if (open) show('wardrobe');
-    });
-
-    if (tabs) tabs.addEventListener('click', (e) => {
-      const t = e.target.closest('.ctrl-tab');
-      if (t) show(t.dataset.view);
+      btn.textContent = open ? '× 收起衣橱' : '👗 电子衣橱';
+      if (open && GL.renderWardrobe) GL.renderWardrobe();
     });
   }
 
@@ -189,7 +153,7 @@
     <div class="card">
       <div class="card-head"><span class="card-title">ℹ️ 关于</span><span class="card-hint">LOCAL-FIRST</span></div>
       <div class="dim">
-        Game Life v${APP_VERSION} · 人物立绘 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度<br>
+        Game Life v${APP_VERSION} · 个人信息 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 / 电子衣橱<br>
         本地优先 · 无需登录 · 数据自主可控。后续可拓展：智能硬件自动同步、多端云同步、照片生成真实比例模型。
       </div>
     </div>`;
@@ -246,8 +210,9 @@
 
   /* ---------- 启动 ---------- */
   /* 每个步骤独立兜错：任何一个模块出问题，都不该让整页停在 opacity:0 的白屏。
-     v1.4.1 事故复盘：曾因 js/avatar.js 漏加载，导致 GL.initAvatar 抛异常，
-     连带后面的 reveal() 未执行，所有 .rv 元素永久隐藏。 */
+     v1.4.1 事故复盘：曾因 js/avatar.js 漏加载，app.js 里调用的 GL.* 成了 undefined，
+     一抛异常就中断了 start()，后面的 reveal() 没跑，所有 .rv 元素永久隐藏、整页白屏。
+     教训是通用的：**启动链上任一环节都不许有能力带走整页**。 */
   function step(name, fn) {
     try { fn(); }
     catch (e) { console.error('[GameLife] 启动步骤失败：' + name, e); }
@@ -257,19 +222,18 @@
     step('load', () => GL.load());
     step('renderSettings', () => renderSettings());
     step('bindSettings', () => bindSettings());
-    step('initAvatar', () => { if (GL.initAvatar) GL.initAvatar(); });
-    step('renderAvatarCtrl', () => { if (GL.renderAvatarCtrl) GL.renderAvatarCtrl(); });
     step('initTabs', () => initTabs());
     step('initCtrlToggle', () => initCtrlToggle());
 
-    // 本文件自己贡献的两个 HUD 视图挂进钩子链
-    GL.hooks.push(renderHudBar, renderStageBase);
+    // 本文件自己贡献的 HUD 视图挂进钩子链
+    GL.hooks.push(renderHudBar);
 
     /* 首屏全量渲染：必须走 GL.changed() 而非逐个手动调用。
-       原因：各模块（portrait / physiology / attributes / skills / life）都是把自己的
+       原因：各模块（avatar / wardrobe / physiology / attributes / skills / life）都是把自己的
        渲染函数 push 进 GL.hooks，只有 GL.changed() 会遍历执行它们。
        v1.4.0 事故复盘：start() 曾只手动调用 renderBody/renderAttrs/... 而从未触发
-       GL.changed()，导致 portrait.js 注册的 render 永不执行 —— 中央立绘始终空白。 */
+       GL.changed()，于是「中央立绘」（当时由 portrait.js 提供，v1.8.1 已随立绘移除）
+       始终空白。这条规矩对所有模块一视同仁。 */
     step('changed (首屏全量渲染)', () => GL.changed());
 
     // reveal 必须最后且必须成功执行 —— 它是唯一的"点亮全屏"动作

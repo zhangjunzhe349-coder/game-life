@@ -63,8 +63,8 @@ const uniq = [...new Set(files)];
 /* ---------- 1c. 硬闸：assets/ 整棵树必须全在产物清单里 ----------
    v1.8.0 踩过的坑：电子衣橱的图片路径原来是运行时拼的
    （'assets/wardrobe/' + id + '.webp'），上面那条「扫 JS 字面量」的规则看不见它 ——
-   dist/ 里一张图都没有、线上全部 404，而 verify-portrait / verify-wiring /
-   verify-migrate 三层以及 build-dist 自己**全是绿的**，是 headless 校验报
+   dist/ 里一张图都没有、线上全部 404，而当时的三层静态校验（含已随立绘删除的
+   verify-portrait）以及 build-dist 自己**全是绿的**，是 headless 校验报
    「已解码 0/41 张」才暴露。图片裂了不会报错，属于最阴的一类失败。
    => 不靠「猜哪些被引用」，直接把 assets/ 当目录整体校验。 */
 const ASSET_ROOT = path.join(ROOT, 'assets');

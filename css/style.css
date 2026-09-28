@@ -262,10 +262,13 @@ b { font-weight: 700; }
 .readout.xp b { color: var(--xp); }
 .readout.warn b { color: var(--xp); }
 
-/* ============ HUD 主区：左翼 / 舞台 / 右翼 ============ */
+/* ============ HUD 主区：左翼 / 右翼 ============
+   v1.8.1 去掉中央立绘后，两翼直接均分整宽。原来三栏
+   （minmax(240,300) / minmax(0,1fr) / minmax(240,310)）的中间那栏就是立绘舞台，
+   现在个人信息改由独立的一条横条承载（见 .profile），不再占列。 */
 .hud {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(240px, 310px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--s5);
   align-items: start;
 }
@@ -540,75 +543,55 @@ b { font-weight: 700; }
 }
 .field-ops input::placeholder { font-family: var(--font-body); letter-spacing: 0.04em; color: var(--faint); }
 
-/* —— 舞台 —— */
-.stage-col { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
-.stage {
-  position: relative;
-  min-height: 520px;
-  border: 1px solid var(--line); border-radius: var(--r-lg);
-  background:
-    radial-gradient(90% 70% at 50% 12%, rgba(60, 232, 176, 0.09), transparent 62%),
-    radial-gradient(70% 60% at 50% 100%, rgba(76, 201, 240, 0.07), transparent 68%),
-    linear-gradient(180deg, #0d1017, #080a0f);
-  box-shadow: var(--sh-2);
-  overflow: hidden;
+/* ============ 个人信息（v1.8.1：顶替原中央立绘） ============
+   立绘原本是一整栏 520px 高，现在收成一条：标题在左，四组字段横向铺开。
+   用户的诉求是「就保留些个人信息，尽量不要占据太多空间」，所以：
+   · **不做折叠** —— 总共就身高/体重/肌肉量/发型 4 项，藏起来反而多两次点击；
+   · 窄屏自动换行（flex-wrap），不横向滚动；
+   · 滑块沿用全局 input[type=range] 样式（见文件下方「表单控件」段），此处只管排布。 */
+.profile {
+  display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(21, 24, 34, 0.72), rgba(11, 13, 19, 0.55));
+  box-shadow: var(--sh-1);
 }
-/* 分层 2D 立绘：SVG 自适应容器，留出上下提示带 */
-#portrait-svg {
-  position: absolute;
-  inset: 34px 0 52px;
-  width: 100%; height: calc(100% - 86px);
-  display: block;
-  /* 立绘本身用代码绘制，无需 GPU 合成开销 */
-  shape-rendering: geometricPrecision;
+.pf-head {
+  display: flex; flex-direction: column; gap: 2px; flex: none;
+  padding-right: var(--s4); border-right: 1px solid var(--line);
 }
-#portrait-svg > g { will-change: auto; }
-.avatar-fallback { padding: var(--s7) var(--s5); color: var(--muted); text-align: center; }
-/* 四角括号：HUD 破格元素 */
-.stage::before, .stage::after {
-  content: ""; position: absolute; width: 26px; height: 26px; pointer-events: none;
-  border: 2px solid var(--accent-line);
-}
-.stage::before { top: 12px; left: 12px; border-right: 0; border-bottom: 0; border-top-left-radius: var(--r-sm); }
-.stage::after { bottom: 12px; right: 12px; border-left: 0; border-top: 0; border-bottom-right-radius: var(--r-sm); }
-.stage-tag {
-  position: absolute; top: 18px; left: 46px; right: 46px;
-  display: flex; justify-content: space-between; gap: var(--s3);
+.pf-title {
   font-family: var(--font-mono); font-size: var(--fs-2xs);
-  letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint);
-  pointer-events: none;
+  letter-spacing: 0.24em; text-transform: uppercase; color: var(--muted);
 }
-.stage-tag b { color: var(--accent); font-weight: 500; }
-.stage-base {
-  position: absolute; left: 22px; right: 22px; bottom: 18px;
-  display: flex; justify-content: space-between; gap: var(--s3); flex-wrap: wrap;
-  padding-top: var(--s3); border-top: 1px solid var(--line);
-  font-family: var(--font-mono); font-size: var(--fs-2xs);
-  letter-spacing: 0.14em; color: var(--faint); text-transform: uppercase;
-  pointer-events: none;
+.pf-title::before { content: "▚ "; color: var(--accent); letter-spacing: 0; }
+.pf-hint { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--faint); }
+.pf-fields { display: flex; align-items: center; gap: var(--s5); flex: 1; flex-wrap: wrap; min-width: 0; }
+.pf-field { display: flex; align-items: center; gap: var(--s2); flex: 1 1 180px; min-width: 0; }
+/* range 是 flex item，UA 样式给了它一个固定固有宽度；不写 min-width:0 它就不肯收缩，
+   窄容器下会连着 output 一起把整行顶出视口 —— v1.8.1 实测就是这么把手机上的
+   内容宽度撑到 449px（视口才 390px）的。 */
+.pf-field input[type="range"] { min-width: 0; }
+.pf-label {
+  flex: none; font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.14em; color: var(--faint); white-space: nowrap;
 }
-.stage-base b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pf-label i { font-style: normal; margin-left: 2px; color: var(--muted); }
+.pf-field output {
+  flex: none; min-width: 30px; text-align: right;
+  font-family: var(--font-display); font-weight: 700; font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums; color: var(--accent);
+}
+.pf-field select { flex: none; min-width: 92px; }
 
-/* 舞台下折叠控制（电子衣橱 / 体型） */
-.ctrl-toggle {
-  display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: center;
-}
+/* ============ 电子衣橱折叠块 ============
+   v1.8.1 起整宽铺开。原先它挂在中间栏的立绘下方，只有约 300px ——
+   41 张卡片的网格在那里挤成一列，所以改为独立一块，独占整行宽度。 */
+.wardrobe-block { display: flex; flex-direction: column; gap: var(--s3); }
+.ctrl-toggle { display: flex; gap: var(--s2); flex-wrap: wrap; }
 #avatar-panel[hidden] { display: none !important; }
-#avatar-panel { display: flex; flex-direction: column; gap: var(--s3); }
-#avatar-ctrl[hidden], #wardrobe-ctrl[hidden] { display: none !important; }
-#avatar-ctrl { display: flex; flex-direction: column; gap: var(--s4); }
-
-/* 面板内页签：默认「电子衣橱」，体型收在第二页 */
-.ctrl-tabs { display: flex; gap: var(--s2); }
-.ctrl-tab {
-  min-height: 34px; padding: 0 var(--s3);
-  border-radius: var(--r-pill); border: 1px solid var(--line);
-  background: var(--surface-2); color: var(--muted);
-  font-size: var(--fs-xs); letter-spacing: 0.06em; cursor: pointer;
-  transition: all var(--dur-fast) ease-out;
-}
-.ctrl-tab:hover { color: var(--accent); border-color: var(--accent-line); }
-.ctrl-tab.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+#avatar-panel { display: block; }
+#wardrobe-ctrl[hidden] { display: none !important; }
 
 /* ============ 电子衣橱：左搭配框 / 右选择区 ============ */
 .wr { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: var(--s4); align-items: start; }
@@ -792,12 +775,8 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
   border: 1px dashed var(--line-strong); border-radius: var(--r-sm);
   display: flex; flex-direction: column; gap: var(--s3);
 }
-.ctl-row { display: flex; align-items: center; gap: var(--s3); padding: 6px 0; }
-.ctl-row label { flex: none; width: 72px; color: var(--muted); font-size: var(--fs-sm); letter-spacing: 0.06em; }
-.ctl-row output {
-  flex: none; width: 46px; text-align: right;
-  font-family: var(--font-mono); font-weight: 500; font-variant-numeric: tabular-nums; color: var(--accent);
-}
+/* .ctl-row（原「体型参数」卡的滑块行）已随旧控制面板移除 ——
+   个人信息条的排布改用 .pf-field，见上方「个人信息」段。 */
 
 /* ============ 技能 ============ */
 .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--s4); }
@@ -939,11 +918,8 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 .rv[data-d="5"] { transition-delay: 400ms; }
 
 /* ============ 响应式 ============ */
-@media (max-width: 1180px) {
-  .hud { grid-template-columns: 1fr 1fr; }
-  .stage-col { grid-column: 1 / -1; order: -1; }
-  .stage { min-height: 440px; }
-}
+/* 原来的 1180px 中断点已随立绘一起取消 —— 它当时只做两件事：
+   把三栏压成两栏、把舞台整行提到最前。现在默认就是两栏，也没有舞台了。 */
 @media (max-width: 900px) {
   .shell { display: block; }
   .side {
@@ -977,7 +953,17 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
      全屏那条规则在此之上还要再多 10px（见文件末尾），所以两者不会互相抵消。 */
   #main { padding: calc(var(--s4) + max(var(--sa-t), 30px)) calc(var(--s4) + var(--sa-r)) calc(112px + var(--sa-b)) calc(var(--s4) + var(--sa-l)); }
   .hud { grid-template-columns: 1fr; gap: var(--s4); }
-  .stage { min-height: 380px; }
+  /* 个人信息在窄屏改竖排：一行塞不下 4 组「标签 + 滑块 + 读数」，
+     硬排会把滑块压到没法拖 */
+  .profile { gap: var(--s3); padding: var(--s4); }
+  /* 标题也必须独占一行。横排时它会把 .pf-fields 挤到只剩 ~110px，
+     而滑块那行自己的最小宽度比这大 —— 整页就被顶出横向滚动 */
+  .pf-head {
+    flex-direction: column; align-items: flex-start; gap: 2px;
+    flex: 1 1 100%; border-right: 0; padding-right: 0;
+  }
+  .pf-fields { flex: 1 1 100%; gap: var(--s3); }
+  .pf-field { flex: 1 1 100%; }
   .hud-bar { padding: var(--s4); gap: var(--s3); }
   .readouts { gap: var(--s4); width: 100%; }
   .readout { flex: 1; min-width: 68px; }

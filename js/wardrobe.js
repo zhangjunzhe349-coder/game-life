@@ -124,7 +124,6 @@
     host.querySelectorAll('.wr-card').forEach((c) => {
       c.classList.toggle('on', ids.indexOf(c.dataset.item) !== -1);
     });
-    if (GL.renderPortrait) GL.renderPortrait();
   }
 
   function wear(it) {

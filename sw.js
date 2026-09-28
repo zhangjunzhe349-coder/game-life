@@ -37,8 +37,13 @@
    ② **assets/wardrobe/ 的 41 张 WebP 故意不进 ASSETS** —— 829 KB 会给首次安装
       平白加一大段等待。它们走 fetch 里那条「未命中就取真身并塞进缓存」的运行时缓存：
       第一次翻开衣橱时按需下载，之后完全离线可用。
+   v15 的改动（移除中央立绘）：
+   ① ASSETS 里删掉 js/portrait.js —— 文件已不存在，留着会让 install 直接失败
+      （addAll 一项 404 就整体 reject，新缓存建不出来、SW 升不上去）。
+   ② 前端资源有变，版本号必须跟着抬：用户 browser 里的旧缓存仍在供 v1.8.0 的
+      portrait.js 与旧 avatar.js，不抬版本就永远换不过来。
    ============================================================ */
-const CACHE = 'gamelife-v14';
+const CACHE = 'gamelife-v15';
 
 const ASSETS = [
   './',
@@ -61,7 +66,6 @@ const ASSETS = [
 
   'js/wardrobe-data.js',
   'js/storage.js',
-  'js/portrait.js',
   'js/avatar.js',
   'js/wardrobe.js',
   'js/physiology.js',

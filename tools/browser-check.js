@@ -10,7 +10,7 @@
 
    本脚本做静态工具做不到的三件事：
    ① 真跑一遍页面，抓 pageerror / console.error
-   ② 断言关键渲染产物真的存在（立绘 path 数、hooks 执行数、.rv 是否点亮）
+   ② 断言关键渲染产物真的存在（属性行数、个人信息字段数、hooks 执行数、.rv 是否点亮）
    ③ 出整页 + 局部 PNG，供肉眼确认
 
    用法：
@@ -197,8 +197,7 @@ function check(ok, label, detail) {
 
   const S = await ev(`(() => {
     const gl = window.GL || {};
-    const svg = document.getElementById('portrait-svg');
-    const stage = document.getElementById('stage');
+    const pf = document.getElementById('profile-card');
     const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; };
     const rows = document.querySelectorAll('.ag-row');
     const groups = document.querySelectorAll('.ag');
@@ -208,10 +207,19 @@ function check(ok, label, detail) {
       hookCount: (gl.hooks || []).length,
       errors: __ERRS__,
       docH: document.documentElement.scrollHeight,
-      portraitPaths: svg ? svg.querySelectorAll('path').length : -1,
-      portraitInnerLen: svg ? svg.innerHTML.length : -1,
-      portraitRect: rect(svg),
-      stageRect: rect(stage),
+      /* v1.8.1：中央立绘已移除，改看个人信息条是否真的渲染出来 */
+      profileRect: rect(pf),
+      pfFields: pf ? pf.querySelectorAll('.pf-field').length : -1,
+      pfRanges: pf ? pf.querySelectorAll('input[type="range"]').length : -1,
+      pfSelects: pf ? pf.querySelectorAll('select').length : -1,
+      pfReadouts: pf ? Array.from(pf.querySelectorAll('output')).map((o) => o.textContent).join('/') : null,
+      pfAvatar: (() => {
+        const a = (gl.state && gl.state.avatar) || {};
+        return [a.height, a.weight, a.muscle, a.hairStyle].join('|');
+      })(),
+      /* 立绘必须真的没了：节点不在，且没有任何 GL.* 提供者去画它 */
+      portraitGone: !document.getElementById('portrait-svg') && !document.getElementById('stage')
+        && typeof gl.renderPortrait === 'undefined' && typeof gl.drawPortrait === 'undefined',
       rvTotal: document.querySelectorAll('.rv').length,
       rvIn: document.querySelectorAll('.rv.in').length,
       cardCount: document.querySelectorAll('.card').length,
@@ -276,7 +284,7 @@ function check(ok, label, detail) {
     console.error('⚠ 应用未在超时内启动完成 —— 启动诊断：' + JSON.stringify(boot));
     const diag = await ev(`(() => {
       const gl = window.GL || {};
-      const want = ['state', 'hooks', 'changed', 'save', 'load', 'attrLevelsFor', 'overallScore', 'lifeGrid', 'textEditBox', 'renderAvatarCtrl'];
+      const want = ['state', 'hooks', 'changed', 'save', 'load', 'attrLevelsFor', 'overallScore', 'lifeGrid', 'textEditBox', 'renderWardrobe'];
       return {
         scriptTags: Array.from(document.querySelectorAll('script[src]')).map((s) => s.getAttribute('src')),
         glKeys: Object.keys(gl).length,
@@ -291,20 +299,32 @@ function check(ok, label, detail) {
   /* ---------- 断言 ---------- */
   check(S.errors.length === 0, '无运行时异常', S.errors.length ? S.errors.slice(0, 3).join(' | ') : `${S.errors.length} 条`);
   check(S.hasGL === true, 'GL 全局已建立');
-  check(S.hookCount >= 7, 'GL.hooks 注册数 ≥ 7', `实际 ${S.hookCount}`);
+  check(S.hookCount >= 6, 'GL.hooks 注册数 ≥ 6', `实际 ${S.hookCount}`);
   check(S.tabCount === 4, '主导航 4 个 tab', `实际 ${S.tabCount}`);
-  check(S.portraitPaths >= 30, '中央立绘已绘制（path 数 ≥ 30）', `实际 ${S.portraitPaths} —— 为 0 说明 hooks 未执行`);
-  check(S.portraitInnerLen > 3000, '立绘 SVG 有实际内容', `innerHTML ${S.portraitInnerLen} 字符`);
-  check(S.portraitRect && S.portraitRect.w > 200 && S.portraitRect.h > 150, '立绘有可见尺寸',
-    S.portraitRect ? `${S.portraitRect.w}×${S.portraitRect.h}` : 'null');
+  /* v1.8.1：中央立绘移除，原来的 portraitPaths / innerHTML 两条断言随之取消，
+     改看顶替它的「个人信息」条是否真的渲染出来 —— 同样是「hooks 有没有跑」的探针。 */
+  check(S.pfFields === 4, '个人信息：4 组字段（身高 / 体重 / 肌肉量 / 发型）', `实际 ${S.pfFields}`);
+  check(S.pfRanges === 3 && S.pfSelects === 1,
+    '个人信息：3 个滑块 + 1 个发型下拉',
+    `滑块 ${S.pfRanges} / 下拉 ${S.pfSelects}`);
+  check(S.profileRect && S.profileRect.w > 240 && S.profileRect.h > 40,
+    '个人信息有可见尺寸（不是 0 高的空壳）',
+    S.profileRect ? `${S.profileRect.w}×${S.profileRect.h}` : 'null');
+  check(S.pfReadouts === S.pfAvatar.split('|').slice(0, 3).join('/'),
+    '个人信息读数与 GL.state.avatar 一致（高度 ≤ 120px：它只是一条，不再占一整栏）',
+    `读数 ${S.pfReadouts} / 状态 ${S.pfAvatar} / 高度 ${S.profileRect ? S.profileRect.h : '?'}px`);
+  check(S.profileRect && S.profileRect.h <= 120,
+    '个人信息不占大块版面（条高 ≤ 120px）', S.profileRect ? `${S.profileRect.h}px` : 'null');
+  check(S.portraitGone === true, '中央立绘确已移除（#portrait-svg 不存在）', `实际 ${S.portraitGone}`);
   check(S.rvTotal > 0 && S.rvIn === S.rvTotal, '入场动画元素全部点亮（.rv.in == .rv）',
     `${S.rvIn}/${S.rvTotal} —— 不相等说明 reveal() 未跑完，页面会白屏`);
   check(S.docH > 900, '页面有正常内容高度', `${S.docH}px`);
   check(S.cardCount >= 5, '卡片已渲染', `${S.cardCount} 张`);
 
-  /* ---------- 电子衣橱（v1.8.0 照片版）----------
+  /* ---------- 电子衣橱（v1.8.0 照片版 / v1.8.1 去立绘）----------
      静态检查全都看不出「页面能看、点不动」，所以这一段**必须真点一遍**：
-     点卡片 → 状态变 → 立绘上真的多出一张照片 → 再点一次能脱下 → 分类筛选生效。 */
+     点卡片 → 状态变 → 搭配框里真的多出一张图 → 再点一次能脱下 → 分类筛选生效。
+     v1.8.1 起中央立绘移除，穿戴的可见证据从「立绘上的照片层」换成「搭配框里的 .wr-fig」。 */
   check(S.wrLib === 41, '衣橱：单品库 41 件', `实际 ${S.wrLib}`);
   check(S.wrCards === 41, '衣橱：41 件全部渲染成卡片', `实际 ${S.wrCards}`);
   check(S.wrSlots === 3, '衣橱：搭配框 3 格（上衣 / 下装 / 鞋·配饰）', `实际 ${S.wrSlots}`);
@@ -319,7 +339,9 @@ function check(ok, label, detail) {
     const ctrl = document.getElementById('wardrobe-ctrl');
     if (ctrl && ctrl.scrollIntoView) ctrl.scrollIntoView({ block: 'start' });
     await sleep(700);
-    const photoN = () => document.querySelectorAll('#portrait-svg image').length;
+    /* 点数「当前搭配」框里出现的单品图。立绘移除后，这就是穿戴唯一可见的凭据 ——
+       语义与 v1.8.0 数立绘照片层等价：点一件 → 框里多一张。 */
+    const photoN = () => document.querySelectorAll('.wr-slot .wr-fig').length;
     const imgs = Array.from(document.querySelectorAll('.wr-card img'));
     const res = {
       imgTotal: imgs.length,
@@ -361,18 +383,18 @@ function check(ok, label, detail) {
   check(wr && wr.imgOk > 0 && wr.imgW === 512,
     '衣橱：卡片图片真的解码出来了（assets/wardrobe/*.webp 路径与格式正确）',
     wr ? `已解码 ${wr.imgOk}/${wr.imgTotal} 张 · 首张 ${wr.imgW}px` : '无');
-  check(wr && wr.p0 === 0, '衣橱：开局立绘上没有照片层', `实际 ${wr && wr.p0}`);
-  check(wr && wr.p1 === 1, '衣橱：点上衣 → 立绘贴出 1 张照片', `实际 ${wr && wr.p1}`);
+  check(wr && wr.p0 === 0, '衣橱：开局搭配框里没有单品图', `实际 ${wr && wr.p0}`);
+  check(wr && wr.p1 === 1, '衣橱：点上衣 → 搭配框出现 1 张图', `实际 ${wr && wr.p1}`);
   check(wr && wr.p2 === 2, '衣橱：再加下装 → 2 张', `实际 ${wr && wr.p2}`);
-  /* 鞋是左右两只各贴一张（左脚镜像），所以上装+下装+鞋 = 4 张 */
-  check(wr && wr.p3 === 4, '衣橱：再加鞋 → 4 张（鞋左右各一张）', `实际 ${wr && wr.p3}`);
+  /* 鞋与配饰合并成一格、且不再往立绘上贴左右两只，所以上装+下装+鞋 = 3 张 */
+  check(wr && wr.p3 === 3, '衣橱：再加鞋 → 3 张（鞋·配饰一格，各 1 张）', `实际 ${wr && wr.p3}`);
   check(wr && wr.state && wr.state.top === 'w01' && wr.state.bottom === 'w07' && wr.state.shoes === 'w38',
     '衣橱：点击真的写进了 GL.state.avatar.outfit（不是只改了个样式）',
     wr && wr.state ? JSON.stringify(wr.state) : '无');
   check(wr && wr.on === 3, '衣橱：已穿的 3 件有选中高亮', `实际 ${wr && wr.on}`);
   check(wr && wr.wearTxt.indexOf('棕色羽绒服') !== -1,
     '衣橱：搭配框显示当前单品名', wr ? JSON.stringify(wr.wearTxt) : '');
-  check(wr && wr.pOff === 2, '衣橱：再点一次能脱下（照片层同步减少）', `实际 ${wr && wr.pOff}`);
+  check(wr && wr.pOff === 2, '衣橱：再点一次能脱下（搭配框同步减少）', `实际 ${wr && wr.pOff}`);
   check(wr && wr.nBottom === 8, '衣橱：筛选「下装」得 8 件', `实际 ${wr && wr.nBottom}`);
   check(wr && wr.nAll === 41, '衣橱：切回「全部」恢复 41 件', `实际 ${wr && wr.nAll}`);
 
@@ -424,13 +446,14 @@ function check(ok, label, detail) {
     const p1 = path.join(ROOT, 'tools', 'browser-shot-full.png');
     fs.writeFileSync(p1, Buffer.from(s1.data, 'base64'));
     shotPaths.push(p1);
-    if (S.stageRect && S.stageRect.w > 100) {
-      const r = S.stageRect;
+    /* 个人信息条单独出图：v1.8.1 顶替中央立绘的那一条，要能一眼看清四组字段的排布 */
+    if (S.profileRect && S.profileRect.w > 100) {
+      const r = S.profileRect;
       const s2 = await send('Page.captureScreenshot', {
         format: 'png',
         clip: { x: Math.max(0, r.x - 10), y: Math.max(0, r.y - 10), width: r.w + 20, height: r.h + 20, scale: 1.4 },
       });
-      const p2 = path.join(ROOT, 'tools', 'browser-shot-stage.png');
+      const p2 = path.join(ROOT, 'tools', 'browser-shot-profile.png');
       fs.writeFileSync(p2, Buffer.from(s2.data, 'base64'));
       shotPaths.push(p2);
     }
@@ -833,6 +856,23 @@ function check(ok, label, detail) {
       scrollX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
       docW: document.documentElement.scrollWidth,
       clientW: document.documentElement.clientWidth,
+      /* 溢出诊断：只报「内容 449px / 视口 390px」是没法下手的，得指名道姓说是谁最宽。
+         找右缘最远的那个元素 —— 它通常就是肇事者（或它所在的整行）。 */
+      widest: (() => {
+        let best = null;
+        document.querySelectorAll('#main *').forEach((el) => {
+          const rr = el.getBoundingClientRect();
+          if (!rr.width) return;
+          if (!best || rr.right > best.right) {
+            best = {
+              right: Math.round(rr.right), w: Math.round(rr.width),
+              tag: el.tagName.toLowerCase(),
+              cls: String(el.className || '').slice(0, 44) || '(无 class)',
+            };
+          }
+        });
+        return best;
+      })(),
       inputFont: input ? parseFloat(getComputedStyle(input).fontSize) : null,
       fontReqs: fontReqs.length,
       googleReqs: googleReqs.length,
@@ -862,7 +902,9 @@ function check(ok, label, detail) {
     check(mob.mainPadBottom !== null && mob.mainPadBottom >= 112,
       '手机：主区底部留白够高，最后一屏不会被悬浮栏压住', `padding-bottom ${mob.mainPadBottom}px`);
     check(mob.scrollX === false,
-      '手机：无横向溢出（不出现左右拖动）', `内容 ${mob.docW}px / 视口 ${mob.clientW}px`);
+      '手机：无横向溢出（不出现左右拖动）',
+      `内容 ${mob.docW}px / 视口 ${mob.clientW}px · 右缘最远：`
+      + (mob.widest ? `${mob.widest.tag}.${mob.widest.cls}（宽 ${mob.widest.w}px，右缘 ${mob.widest.right}px）` : '?'));
     check(mob.inputFont !== null && mob.inputFont >= 16,
       '手机：输入框字号 ≥ 16px（否则 iOS 聚焦时会自动放大整页）', `${mob.inputFont}px`);
 

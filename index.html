@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#08090d">
-<meta name="description" content="Game Life · 把人生当成游戏来打：人物立绘 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度">
+<meta name="description" content="Game Life · 把人生当成游戏来打：个人信息 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 / 电子衣橱">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
@@ -43,7 +43,7 @@
 
   <main id="main">
 
-    <!-- ========== 总览：以 人物立绘为中心的 HUD ========== -->
+    <!-- ========== 总览：角色状态 HUD（v1.8.1 起中央立绘已移除） ========== -->
     <section class="panel" id="panel-hud">
       <header class="hud-bar rv" data-d="1">
         <div class="who">
@@ -53,36 +53,25 @@
         <div class="readouts" id="hud-readouts"></div>
       </header>
 
+      <!-- 个人信息：顶替原立绘位，只占一条（身高 / 体重 / 肌肉量 / 发型，可直接改） -->
+      <section class="profile rv" data-d="2" id="profile-card" aria-label="个人信息"></section>
+
       <div class="hud">
         <!-- 左翼：属性面板 -->
-        <section class="wing rv" data-d="2" id="wing-attrs" aria-label="属性面板"></section>
-
-        <!-- 中央：人物立绘舞台 -->
-        <section class="stage-col rv" data-d="3">
-          <div class="stage" id="stage">
-            <svg id="portrait-svg" viewBox="0 0 680 1000" preserveAspectRatio="xMidYMid meet" role="img" aria-label="人物立绘"></svg>
-            <div class="stage-tag" aria-hidden="true">
-              <span>CHARACTER <b>PORTRAIT</b></span>
-              <span>分层立绘 · 随体型 / 衣橱实时变化</span>
-            </div>
-            <div class="stage-base" id="stage-base" aria-hidden="true"></div>
-          </div>
-          <div class="ctrl-toggle">
-            <button class="btn mini" id="ctrl-toggle" aria-expanded="false">👗 电子衣橱</button>
-          </div>
-          <!-- 默认展示「电子衣橱」；体型参数收进第二个页签（用户要求：体型收起来） -->
-          <div id="avatar-panel" hidden>
-            <div class="ctrl-tabs" id="ctrl-tabs" role="tablist">
-              <button class="ctrl-tab on" data-view="wardrobe" type="button">👗 电子衣橱</button>
-              <button class="ctrl-tab" data-view="body" type="button">📏 体型</button>
-            </div>
-            <div id="wardrobe-ctrl"></div>
-            <div id="avatar-ctrl" hidden></div>
-          </div>
-        </section>
+        <section class="wing rv" data-d="3" id="wing-attrs" aria-label="属性面板"></section>
 
         <!-- 右翼：生理状态 -->
         <section class="wing rv" data-d="4" id="wing-body" aria-label="生理状态"></section>
+      </div>
+
+      <!-- 电子衣橱：原先挂在立绘下方，立绘移除后改为整宽展开（卡片网格需要横向空间） -->
+      <div class="wardrobe-block rv" data-d="5">
+        <div class="ctrl-toggle">
+          <button class="btn mini" id="ctrl-toggle" aria-expanded="false">👗 电子衣橱</button>
+        </div>
+        <div id="avatar-panel" hidden>
+          <div id="wardrobe-ctrl"></div>
+        </div>
       </div>
     </section>
 
@@ -98,7 +87,6 @@
 <script src="js/storage.js"></script>
 <script src="js/wardrobe-data.js"></script>
 <script src="js/avatar.js"></script>
-<script src="js/portrait.js"></script>
 <script src="js/wardrobe.js"></script>
 <script src="js/physiology.js"></script>
 <script src="js/attributes.js"></script>

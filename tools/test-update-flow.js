@@ -114,7 +114,7 @@ function cdpGet(port, p) {
    量出来的其实是「我采样了几次」，不是「页面加载了几次」。 */
 const MARKS = `(async () => {
   const g = window.GL || {};
-  const sb = document.getElementById('stage-base');
+  const pf = document.getElementById('profile-card');
   const main = document.getElementById('main');
   /* SW 生命周期的**现场记录**：光看「缓存建没建」会骗人 ——
      新 SW 完全可能已经把缓存建好了却停在 waiting（install 的 waitUntil 没结束、
@@ -146,14 +146,15 @@ const MARKS = `(async () => {
   return {
     docId: String(performance.timeOrigin),
     ver: g.VERSION || null,
-    stageText: sb ? sb.innerText.replace(/\\s+/g, ' ').trim() : null,
-    stageLines: sb ? sb.innerText.trim().split('\\n').filter(Boolean).length : -1,
     padTop: main ? parseFloat(getComputedStyle(main).paddingTop) : null,
     /* 「看到版本号」不够 —— 页面可能已经换版但还没启动完（<head> 的 CSS 已生效、
        <body> 末尾的脚本还没跑）。所以额外记录「应用真的起来了」的证据。 */
     booted: !!(g.state && g.state.attributes),
     hudReadouts: (document.getElementById('hud-readouts') || { children: [] }).children.length,
-    portraitPaths: document.querySelectorAll('#portrait-svg path').length,
+    /* 个人信息条（v1.8.1 起顶替中央立绘）：字段数 = 渲染链完整跑通的证据。
+       旧版 v1.8.0 只有 stage-base，没有 .pf-field —— 所以它同时是「新版真的生效」的判据。 */
+    pfFields: pf ? pf.querySelectorAll('.pf-field').length : -1,
+    portraitGone: !document.getElementById('portrait-svg'),
     controlled: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
     ctrlName: (navigator.serviceWorker && navigator.serviceWorker.controller)
       ? navigator.serviceWorker.controller.scriptURL.split('/').pop() : null,
@@ -439,9 +440,12 @@ self.addEventListener('activate', () => {
     check(m1.ver !== NEW_VER, `负向验证：摘掉修复后，打开一次**看不到**新版（实测 v${m1.ver}）—— 说明这条断言真的有牙`,
       m1.ver === NEW_VER ? '竟然变成新版了，说明测试没复现出问题，断言不可信' : '');
   } else {
-    check(oneTime, `打开一次即看到新版且启动完好（v${m1.ver}，读数 ${m1.hudReadouts} 项、立绘 ${m1.portraitPaths} 条路径${one.hit ? `，${one.ms}ms 内` : '，超时未完成'}）`,
+    check(oneTime, `打开一次即看到新版且启动完好（v${m1.ver}，读数 ${m1.hudReadouts} 项、个人信息 ${m1.pfFields} 组字段${one.hit ? `，${one.ms}ms 内` : '，超时未完成'}）`,
       oneTime ? '' : detail(''));
-    check(m1.stageLines === 1, `立绘下方读数只剩 1 行（实测 ${m1.stageLines} 行：${m1.stageText}）`);
+    /* v1.8.1 的换版判据：立绘没了、个人信息条在。
+       光看 VERSION 字符串只能证明「文档换了」，这两条才能证明「新代码真的跑起来了」。 */
+    check(m1.portraitGone === true, `中央立绘已随之移除（#portrait-svg 不存在：${m1.portraitGone}）`);
+    check(m1.pfFields === 4, `个人信息 4 组字段已渲染（实测 ${m1.pfFields} 组）`);
     /* 这里断言的是**要求**（页头必须留出状态栏空间），不是**变化** ——
        早先写成「必须比旧版更大」，一旦拿 v1.7.4 当旧版（它已经有这条留白）
        就会无辜报错。校验脚本自己也要避免这种「只对某个特定旧版成立」的判据。 */

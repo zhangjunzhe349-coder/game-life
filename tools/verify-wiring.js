@@ -1,8 +1,11 @@
 /* ============================================================
    集成校验：index.html 与 JS 的「DOM id ↔ 代码引用」是否对得上
    跑法：node game-life/tools/verify-wiring.js
-   —— 补上 portrait.js 无头校验管不到的那一环：
+   —— 补上单元级校验管不到的那一环：
       脚本加载顺序、宿主节点存在性、被移除节点的残留引用
+      （v1.8.1 起 tools/verify-portrait.js 随立绘一起删除，
+        原先由它盯的「立绘是否画出来」不再需要，但「立绘不得复活」
+        这条反向断言挪到了本文件第 3 节）
    ============================================================ */
 const fs = require('fs');
 const path = require('path');
@@ -21,7 +24,7 @@ const localScripts = scripts.filter((s) => !/^https?:/.test(s));
    ① 它是裸 `GL.WARDROBE_LIB = …`，GL 由 storage.js 建（`const GL = window.GL = {}`），
       排在前面会直接 ReferenceError: GL is not defined（v1.8.0 实测踩过）；
    ② 反过来 storage.js 更不能排在它后面，那会把 window.GL 整个重置掉。 */
-const EXPECT = ['js/storage.js', 'js/wardrobe-data.js', 'js/avatar.js', 'js/portrait.js',
+const EXPECT = ['js/storage.js', 'js/wardrobe-data.js', 'js/avatar.js',
   'js/wardrobe.js', 'js/physiology.js',
   'js/attributes.js', 'js/skills.js', 'js/life.js', 'js/app.js'];
 if (JSON.stringify(localScripts) !== JSON.stringify(EXPECT)) {
@@ -73,8 +76,8 @@ if (scripts.some((s) => /three/i.test(s))) {
 }
 
 /* ---------- 2. 宿主节点存在性 ---------- */
-const NEEDED = ['portrait-svg', 'stage', 'stage-base', 'hud-lv', 'hud-readouts',
-  'wing-attrs', 'wing-body', 'tabs', 'ctrl-toggle', 'avatar-ctrl',
+const NEEDED = ['profile-card', 'hud-lv', 'hud-readouts', 'wing-attrs', 'wing-body',
+  'tabs', 'ctrl-toggle', 'avatar-panel', 'wardrobe-ctrl',
   'panel-hud', 'panel-skills', 'panel-life', 'panel-settings', 'toast-box', 'main'];
 for (const id of NEEDED) {
   if (!new RegExp(`id="${id}"`).test(html)) problems.push(`index.html 缺少宿主节点 #${id}`);
@@ -83,20 +86,37 @@ if (NEEDED.every((id) => new RegExp(`id="${id}"`).test(html))) {
   ok.push(`宿主节点齐全（${NEEDED.length} 个）`);
 }
 
-/* ---------- 3. 立绘 SVGSVG 属性 ---------- */
-const svgTag = (html.match(/<svg id="portrait-svg"[^>]*>/) || [''])[0];
-if (!/viewBox="0 0 680 1000"/.test(svgTag)) problems.push('#portrait-svg 的 viewBox 不是 "0 0 680 1000"（与 portrait.js 画布不符）');
-else ok.push('#portrait-svg viewBox 与 portrait.js 画布一致（680×1000）');
+/* ---------- 3. 中央立绘已移除：这些宿主节点不得复活（v1.8.1） ----------
+   用户拍板「角色立绘效果不好，去掉这个模块，只保留个人信息」，于是
+   js/portrait.js 与 #portrait-svg / #stage / #stage-base / #avatar-ctrl 整条链路删除，
+   个人信息改由 #profile-card 承载。
+   留这条反向断言，是因为最容易犯的回归不是「删漏了」，而是**改别处时顺手把旧节点加回来**
+   —— 那会让个人信息与立绘同时存在，而没有任何校验会因此报错。 */
+const GONE = ['portrait-svg', 'stage', 'stage-base', 'avatar-ctrl', 'ctrl-tabs'];
+const revived = GONE.filter((id) => new RegExp(`id="${id}"`).test(html));
+if (revived.length) {
+  problems.push(
+    `index.html 里又出现了 v1.8.1 已移除的宿主节点：#${revived.join('、#')} —— ` +
+    '中央立绘已废除，个人信息由 #profile-card 承载；立绘相关文件也已不在仓里，加了节点也没人渲染',
+  );
+} else {
+  ok.push(`已移除的立绘宿主节点确认不复存在（${GONE.length} 个：${GONE.join(', ')}）`);
+}
+if (fs.existsSync(path.join(ROOT, 'js', 'portrait.js'))) {
+  problems.push('js/portrait.js 又回来了 —— v1.8.1 已确认移除中央立绘，若确实要恢复请连带改 index.html / sw.js / 本文件');
+} else {
+  ok.push('js/portrait.js 已不在仓中（立绘整体移除）');
+}
 
 /* ---------- 4. 被移除节点不得再被 JS 引用 ---------- */
 const jsFiles = fs.readdirSync(path.join(ROOT, 'js')).filter((f) => f.endsWith('.js'));
-const REMOVED = ['avatar-canvas'];
+/* avatar-canvas 是 3D 时代的宿主；portrait-svg / stage-base / avatar-ctrl 随中央立绘一并删除。
+   v1.8.1 起不再有「休眠段豁免」—— 仓里已经没有会碰这些节点的代码，任何人再引用都是 bug。 */
+const REMOVED = ['avatar-canvas', 'portrait-svg', 'stage-base', 'avatar-ctrl'];
 for (const f of jsFiles) {
   const src = fs.readFileSync(path.join(ROOT, 'js', f), 'utf8');
   for (const id of REMOVED) {
     if (src.includes(`getElementById('${id}')`)) {
-      // avatar.js 的休眠 3D 段是允许的
-      if (f === 'avatar.js') { ok.push(`avatar.js 仍引用 #${id}（休眠 3D 段，只在 THREE 存在时执行）`); continue; }
       problems.push(`${f} 引用了 index.html 中已不存在的 #${id}`);
     }
   }
@@ -191,7 +211,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 14;   // v1.8.0：电子衣橱照片版（新增 wardrobe-data.js / wardrobe.js / 立绘贴图），资源有变必须 ≥ v14
+const MIN_SW_VER = 15;   // v1.8.1：移除中央立绘（删 js/portrait.js、index.html 改布局、avatar.js 收缩、css 重排），资源有变必须 ≥ v15
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 
