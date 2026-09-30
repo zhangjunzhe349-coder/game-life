@@ -2,36 +2,45 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.8.1';
+  const APP_VERSION = '1.8.2';
   GL.VERSION = APP_VERSION;
 
-  /* ---------- 记录天数 ---------- */
-  function recordDays() {
-    const days = new Set();
-    const add = (arr) => (arr || []).forEach((x) => days.add(GL.todayKey(x.t)));
-    add(GL.state.physiology.hydration.logs);
-    GL.state.physiology.fields.forEach((f) => add(f.history));
-    GL.state.attributes.forEach((a) => add(a.history));
-    GL.state.skills.forEach((s) => add(s.logs));
-    return days.size;
+  /* ---------- 顶部 HUD 读数 ----------
+     v1.8.2 按用户要求重做：只留三格，且三格都要「像游戏」——
+       剩余生命（周）· 年龄（精确到天）· 电量（一个电池）
+     删掉的三格是「记录天数 / 累计经验 / 状态均值」：前两个是记账信息、
+     最后一个是抽象均值，都跟「角色此刻处在什么状态」无关。
+     用户原话：「展现的信息不贴近游戏感，记录天数不要了，累计经验页不要了，
+     状态均值也不要了，加一个年龄，要精确到天的那种，还有当前显示当前电量，
+     一个电池，这个跟踪底下的生理值。」 */
+
+  /* 电池：电量 = 属性面板「生理值」组的综合状态（按极性反转，困倦度低=电量高）。
+     颜色三档：≥70 信号青 / ≥40 琥珀 / 其余红 —— 与全站语义色一致。 */
+  function batterySvg(pct) {
+    const color = pct >= 70 ? '#3ce8b0' : (pct >= 40 ? '#ffc24b' : '#ff5f6d');
+    const w = Math.max(0, Math.round(32 * Math.max(0, Math.min(100, pct)) / 100));
+    return `<svg class="batt" viewBox="0 0 46 22" width="46" height="22" role="img" aria-label="电量 ${pct}%">
+      <rect x="1" y="1" width="38" height="20" rx="5" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="2"/>
+      <rect x="41" y="7" width="4" height="8" rx="2" fill="rgba(255,255,255,0.28)"/>
+      ${w > 0 ? `<rect x="4" y="4" width="${w}" height="14" rx="3" fill="${color}"/>` : ''}
+    </svg>`;
   }
 
-  /* ---------- 顶部 HUD 读数 ---------- */
   function renderHudBar() {
     const lvEl = document.getElementById('hud-lv');
     const boxEl = document.getElementById('hud-readouts');
     if (!lvEl || !boxEl) return;
     const hero = GL.heroLevel();
     const life = GL.lifeInfo();
-    /* 用 GL.overallScore() 而非直接平均：负向指标（熵值、困倦度）会被反转，
-       否则「熵值低」这个好状态反而拉低总分。 */
-    const avg = GL.overallScore();
+    const batt = GL.groupScore('physio');
     lvEl.textContent = hero.level;
     boxEl.innerHTML = `
-      <div class="readout"><b>${recordDays()}<i>天</i></b><span>记录天数</span></div>
       <div class="readout warn"><b>${life.remainW.toLocaleString()}<i>周</i></b><span>剩余生命</span></div>
-      <div class="readout xp"><b>${hero.total.toLocaleString()}<i>XP</i></b><span>累计经验</span></div>
-      <div class="readout"><b>${avg}<i>/100</i></b><span>状态均值</span></div>`;
+      <div class="readout"><b>${life.ageY}<i>岁</i> ${life.ageD}<i>天</i></b><span>年龄</span></div>
+      <div class="readout batt-readout" title="电量 = 属性面板「生理值」6 项的综合状态">
+        <b>${batterySvg(batt === null ? 0 : batt)}<span class="batt-pct">${batt === null ? '—' : batt}<i>%</i></span></b>
+        <span>电量</span>
+      </div>`;
   }
 
   /* ---------- 入场序列 ---------- */
@@ -53,6 +62,9 @@
       document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === btn));
       const id = btn.dataset.tab;
       document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'panel-' + id));
+      /* 技能详情浮层挂在 <body> 上（不受 panel 的重渲染影响），
+         所以切页签时必须显式关掉，否则它会浮在新页面上方。 */
+      if (GL.closeSkillModal) GL.closeSkillModal();
       if (id === 'life') GL.renderLife();
       reveal(document.getElementById('panel-' + id));
       window.scrollTo({ top: 0 });
@@ -77,7 +89,12 @@
     });
   }
 
-  /* ---------- 设置面板 ---------- */
+  /* ---------- 设置面板 ----------
+     v1.8.2 按用户要求瘦身，只留「数据管理」与「关于」两张卡。
+     撤掉的三张是「技能篇预设」「版本与回滚」「安装到桌面」——
+     用户原话：「这都属于和用户体验无关的信息」。
+     数据管理反过来做厚了一点：导出后必须**明确告诉用户文件去哪了**
+     （「不然用户找不到」），否则导出等于没导出。 */
   function renderSettings() {
     const el = document.getElementById('panel-settings');
     if (!el) return;
@@ -96,6 +113,7 @@
         <input type="file" id="file-import" accept=".json,application/json" hidden>
         <button class="btn danger" id="btn-reset">🗑 恢复默认</button>
       </div>
+      <div id="export-result" class="save-path" hidden></div>
       <div class="dim" style="margin-top:12px">
         · <b>换设备 / 换浏览器</b>：先「导出备份」，在新设备「导入备份」即可完整迁移。<br>
         · 清除浏览器数据会清空记录，建议定期导出备份。
@@ -103,60 +121,35 @@
     </div>
 
     <div class="card">
-      <div class="card-head"><span class="card-title">📋 技能篇预设</span><span class="card-hint">元技能与方法论</span></div>
-      <div class="muted">一键写入《【游戏人生(技能篇)】元技能与方法论》中的全部内容：</div>
-      <div class="dim">
-        · <b>技能</b>：语言（写作 / 口头表达）· 社交（small talk）· 生理（力量 / 敏捷）· 阅历 / 眼界 / 审美力<br>
-        · <b>属性</b>：精力管理 4 值（体能 / 情绪 / 思维 / 意志）+ 外貌 4 项（皮肤 / 穿搭 / 发型 / 牙齿）<br>
-        · <b>生理指标</b>：睡眠时长 · 肌肉量 · 喉咙(咽部) · 鼻炎
-      </div>
-      <div class="set-row">
-        <button class="btn primary" id="btn-preset">⚡ 应用技能篇预设</button>
-      </div>
-      <div class="dim" style="margin-top:10px">⚠ 会覆盖现有技能 / 属性 / 生理指标（形象、饮水记录、生命参数保留）。</div>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><span class="card-title">🧬 版本与回滚</span><span class="card-hint">v${APP_VERSION} · Git 版本管理</span></div>
-      <div class="dim">
-        本项目已纳入 Git 版本管理，<b>每个可运行版本都会打一个 tag</b>，改坏了可以随时回到任意一版。
-      </div>
-      <div class="edit-box">
-        <div class="field-label">回到上一个版本（在 game-life 目录执行）</div>
-        <div class="dim" style="font-family:var(--font-mono);font-size:12px;line-height:2">
-          git tag&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# 列出所有版本<br>
-          git checkout v1.1.0 -- .&nbsp;&nbsp;# 把文件整体恢复到 v1.1.0<br>
-          git checkout -b fix&nbsp;v1.1.0&nbsp;&nbsp;# 或从该版本开一条修复分支
-        </div>
-        <div class="field-label">只撤销某一次改动（保留之后的改动）</div>
-        <div class="dim" style="font-family:var(--font-mono);font-size:12px;line-height:2">
-          git log --oneline&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# 找到要撤销的提交号<br>
-          git revert &lt;commit-id&gt;&nbsp;&nbsp;# 生成一次反向提交
-        </div>
-      </div>
-      <div class="dim" style="margin-top:10px">
-        规范：提交信息遵循 <b>Conventional Commits</b>（feat / fix / style / refactor / chore），
-        版本号遵循 <b>SemVer</b>——新功能 +0.1.0，纯视觉/修复 +0.0.1。每次交付前先提交并打 tag。
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><span class="card-title">📲 安装到桌面</span></div>
-      <div class="dim">
-        · <b>Android / Chrome：</b>浏览器菜单 → 「添加到主屏幕 / 安装应用」。<br>
-        · <b>iOS / Safari：</b>分享按钮 → 「添加到主屏幕」。<br>
-        · <b>电脑端：</b>地址栏右侧安装图标，或菜单 → 「安装 Game Life」。<br>
-        安装后离线也能打开，体验和原生 App 一致。
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><span class="card-title">ℹ️ 关于</span><span class="card-hint">LOCAL-FIRST</span></div>
+      <div class="card-head"><span class="card-title">ℹ️ 关于</span><span class="card-hint">LOCAL-FIRST · v${APP_VERSION}</span></div>
       <div class="dim">
         Game Life v${APP_VERSION} · 个人信息 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 / 电子衣橱<br>
         本地优先 · 无需登录 · 数据自主可控。后续可拓展：智能硬件自动同步、多端云同步、照片生成真实比例模型。
       </div>
     </div>`;
+  }
+
+  /* 导出结果面板：文件名 / 大小 / 保存位置（按平台判定）+ 复制路径 + 另存一份。
+     位置说明来自 GL.saveLocation()：浏览器读不到真实下载目录，
+     所以给的是「该平台默认落到哪」+「怎么找到它」—— 这是纯网页能做到的上限。 */
+  function showExportResult(name, byteLen, file, canShare) {
+    const box = document.getElementById('export-result');
+    if (!box) return;
+    const loc = GL.saveLocation();
+    box.dataset.path = loc.path;
+    box._file = file || null;
+    box.innerHTML = `
+      <div class="sp-head">✅ 备份已导出</div>
+      <div class="sp-row"><span>文件名</span><b>${GL.esc(name)}</b></div>
+      <div class="sp-row"><span>大小</span><b>${(byteLen / 1024).toFixed(1)} KB</b></div>
+      <div class="sp-row"><span>保存位置</span><b class="sp-path">${GL.esc(loc.path)}</b></div>
+      <div class="sp-how">${loc.how}</div>
+      <div class="sp-how dim">浏览器出于安全限制，<b>网页读不到实际下载目录</b>，上面是所在平台的默认位置；按文件名就能找到它。</div>
+      <div class="set-row">
+        <button class="btn mini" id="btn-copy-path">📋 复制路径</button>
+        ${canShare ? '<button class="btn mini" id="btn-share-file">📤 另存 / 分享一份</button>' : ''}
+      </div>`;
+    box.hidden = false;
   }
 
   function bindSettings() {
@@ -166,22 +159,38 @@
 
     el.addEventListener('click', (e) => {
       if (e.target.id === 'btn-export') {
-        const blob = new Blob([JSON.stringify(GL.state, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a');
+        const json = JSON.stringify(GL.state, null, 2);
         const d = new Date();
         const pad = (n) => String(n).padStart(2, '0');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'gamelife-backup-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.json';
-        a.click();
-        URL.revokeObjectURL(a.href);
+        const name = 'gamelife-backup-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '.json';
+        const blob = new Blob([json], { type: 'application/json' });
+        const file = new File([blob], name, { type: 'application/json' });
+        const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+
+        /* 安卓 App（Capacitor 的 WebView）不一定处理 blob 下载 → 优先交给系统分享，
+           用户自己选位置；网页端照旧用 <a download>，那才是桌面用户的预期。 */
+        if (GL.isNativeApp() && canShare) {
+          navigator.share({ files: [file], title: name }).catch(() => { /* 用户取消 */ });
+        } else {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = name;
+          a.click();
+          /* 立刻 revoke 有可能把还没开始的下载掐掉，留 4 秒缓冲 */
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        }
+        showExportResult(name, blob.size, file, canShare);
         GL.toast('备份已导出', 'ok');
       } else if (e.target.id === 'btn-import') {
         el.querySelector('#file-import').click();
-      } else if (e.target.id === 'btn-preset') {
-        if (!confirm('⚠ 应用《技能篇》预设将覆盖现有的技能 / 属性 / 生理指标，确定继续吗？')) return;
-        GL.applyDocPreset();
-        GL.toast('技能篇预设已写入', 'ok');
-        GL.changed();
+      } else if (e.target.id === 'btn-copy-path') {
+        const box = el.querySelector('#export-result');
+        GL.copy((box && box.dataset.path) || '')
+          .then((ok) => GL.toast(ok ? '路径已复制' : '复制失败，请手动选中复制', ok ? 'ok' : 'err'));
+      } else if (e.target.id === 'btn-share-file') {
+        const box = el.querySelector('#export-result');
+        const f = box && box._file;
+        if (f && navigator.share) navigator.share({ files: [f], title: f.name }).catch(() => {});
       } else if (e.target.id === 'btn-reset') {
         if (!confirm('⚠️ 将清空全部数据并恢复默认（含所有历史记录），确定继续吗？')) return;
         GL.reset();

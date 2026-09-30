@@ -42,8 +42,13 @@
       （addAll 一项 404 就整体 reject，新缓存建不出来、SW 升不上去）。
    ② 前端资源有变，版本号必须跟着抬：用户 browser 里的旧缓存仍在供 v1.8.0 的
       portrait.js 与旧 avatar.js，不抬版本就永远换不过来。
+   v16 的改动（顶栏读数 / 设置页 / 技能列表，均为 v1.8.2）：
+   ① 顶栏读数换成 剩余生命 · 年龄（精确到天）· 电量电池；设置页撤掉三张卡；
+      技能默认改为紧凑网格、点开弹浮层详情。
+   ② ASSETS 清单本身没变，但 css/style.css 与 js/app.js / js/skills.js / js/storage.js
+      内容全变了 —— 不抬版本号，用户浏览器里的旧缓存会继续供应旧界面。
    ============================================================ */
-const CACHE = 'gamelife-v15';
+const CACHE = 'gamelife-v16';
 
 const ASSETS = [
   './',

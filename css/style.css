@@ -259,8 +259,15 @@ b { font-weight: 700; }
 }
 .readout b i { font-style: normal; font-size: var(--fs-2xs); color: var(--muted); margin-left: 3px; letter-spacing: 0.1em; }
 .readout span { font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.2em; color: var(--faint); text-transform: uppercase; }
-.readout.xp b { color: var(--xp); }
 .readout.warn b { color: var(--xp); }
+/* 电量电池（v1.8.2）：一个电池形条 + 百分比读数，跟踪属性面板的「生理值」组。
+   颜色三档与全站语义色一致：≥70 信号青 / ≥40 琥珀 / 其余红。 */
+.batt-readout b { display: flex; align-items: center; gap: 8px; }
+.batt { flex: none; display: block; }
+.batt-pct {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: var(--fs-lg); font-variant-numeric: tabular-nums; color: var(--text);
+}
 
 /* ============ HUD 主区：左翼 / 右翼 ============
    v1.8.1 去掉中央立绘后，两翼直接均分整宽。原来三栏
@@ -780,6 +787,40 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 
 /* ============ 技能 ============ */
 .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--s4); }
+
+/* —— 顶部工具条：展开全部 / 收拢全部（一个按钮来回切）—— */
+.sk-tools { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4); }
+.sk-tools .dim { font-size: var(--fs-xs); }
+
+/* —— 紧凑小卡（v1.8.2 默认形态）——
+   图标 + 名称 + 等级 + 经验条，整块约 66px 高，面积约完整卡片的 1/4。
+   用户原话：「默认展示变成一个图标，加名称，加底下的经验条，加等级，
+   整个面积差不多就原来的 1/4，点开才会弹出目前的展示信息」。
+   必须重置 button 的默认外观（appearance/font/color），否则会在 HUD 里长得像表单控件。 */
+.skill-grid.mini { grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: var(--s3); }
+.sk-tile {
+  appearance: none; -webkit-appearance: none;
+  display: flex; flex-direction: column; gap: 8px;
+  width: 100%; min-height: 66px;
+  padding: 11px var(--s3) 12px;
+  text-align: left; font: inherit; color: inherit; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: linear-gradient(180deg, rgba(21, 24, 34, 0.82), rgba(11, 13, 19, 0.6));
+  box-shadow: var(--sh-1);
+  transition: border-color var(--dur-fast) ease-out, transform var(--dur-fast) ease-out;
+}
+.sk-tile:hover { border-color: var(--accent-line); transform: translateY(-2px); }
+.sk-tile:active { transform: scale(0.985); }
+.sk-tile:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(60, 232, 176, 0.12); }
+.sk-row { display: flex; align-items: center; gap: 7px; min-width: 0; width: 100%; }
+.sk-tile .skill-emoji { font-size: 17px; }
+/* 名称单行截断：小卡高度必须一致（长名如「small talk闲聊能力」不许把格子撑高） */
+.sk-tile .skill-name {
+  font-size: var(--fs-sm); letter-spacing: 0.02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sk-tile .skill-lv { padding: 1px 6px; font-size: 10px; letter-spacing: 0.06em; }
+.sk-tile .xp-bar { display: block; height: 5px; margin: 0; }
 .skill {
   position: relative;
   padding: var(--s4) var(--s4) var(--s3);
@@ -838,6 +879,43 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 .xp-add input[type="number"] { width: 78px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .xp-add input[type="text"] { flex: 1 1 120px; min-width: 0; }
 
+/* ============ 技能详情浮层（v1.8.2） ============
+   点紧凑小卡 → 弹出该项的完整信息（进度 / 累计 XP / 加经验 / 注释 / 成长记录）。
+   浮层挂在 <body> 上（不是 panel-skills 里）——GL.changed() 会整个替换面板的
+   innerHTML，浮层若在里面，任何一次状态变更都会把它连滚动位置一起抹掉。 */
+.smodal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: var(--s4); }
+.smodal[hidden] { display: none !important; }
+.smodal-mask { position: absolute; inset: 0; background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(6px); }
+.smodal-box {
+  position: relative; width: min(560px, 100%);
+  max-height: min(86vh, 780px); overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--s5);
+  border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  box-shadow: var(--sh-3);
+  animation: dropIn var(--dur-base) var(--ease-out);
+}
+.smodal-x {
+  position: absolute; top: 10px; right: 12px; z-index: 1;
+  width: 34px; height: 34px; border-radius: var(--r-xs);
+  border: 1px solid var(--line); background: var(--surface-3); color: var(--muted);
+  font-size: 18px; line-height: 1; cursor: pointer;
+  transition: color var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
+}
+.smodal-x:hover { color: var(--accent); border-color: var(--accent-line); }
+.smodal-head { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; padding-right: 40px; }
+.smodal-title { font-family: var(--font-display); font-weight: 700; font-size: var(--fs-lg); letter-spacing: 0.04em; }
+.smodal-sub {
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.14em; color: var(--faint); text-transform: uppercase;
+}
+.smodal-head + .skill { margin-top: var(--s4); }
+/* 浮层里那张「完整卡片」不再自带卡片外框 —— 它已经在浮层里了，
+   再套一层边框会显得像盒子里套盒子 */
+.smodal .skill { padding: 0; border: 0; background: none; box-shadow: none; }
+.smodal .skill:hover { transform: none; }
+body.modal-open { overflow: hidden; }
+
 /* ============ 生命刻度 ============ */
 .life-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s3); }
 .life-stat {
@@ -867,6 +945,36 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 
 /* ============ 设置 ============ */
 .set-row { display: flex; gap: var(--s3); flex-wrap: wrap; margin-top: var(--s4); }
+
+/* —— 导出结果面板（v1.8.2）——
+   用户原话：「导出备份的时候要显示一下导出的路径，不然用户找不到」。
+   网页读不到真实下载目录，所以这里给出的是「该平台默认存到哪」+「怎么找到」，
+   并把路径做成可整段选中的文本（配「复制路径」按钮，粘到资源管理器地址栏即可直达）。 */
+.save-path {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: var(--s4); padding: var(--s4);
+  border: 1px solid var(--accent-line); border-radius: var(--r-sm);
+  background: rgba(60, 232, 176, 0.06);
+  animation: dropIn var(--dur-base) var(--ease-out);
+}
+.save-path[hidden] { display: none !important; }
+.save-path .set-row { margin-top: 2px; }
+.sp-head { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.06em; color: var(--accent); }
+.sp-row { display: flex; align-items: baseline; gap: var(--s3); font-size: var(--fs-sm); flex-wrap: wrap; }
+.sp-row > span:first-child {
+  flex: none; width: 62px;
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.16em; color: var(--faint); text-transform: uppercase;
+}
+.sp-row b { font-weight: 500; word-break: break-all; }
+.sp-path {
+  font-family: var(--font-mono); color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 6px; border-radius: var(--r-xs);
+  user-select: all;
+}
+.sp-how { font-size: var(--fs-xs); line-height: 1.7; color: var(--muted); }
+.sp-how b { color: var(--text); font-weight: 500; }
 
 /* ============ Toast ============ */
 #toast-box {
@@ -975,7 +1083,14 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
      会把「剩余生命 · 约 49 年」的「年」字挤到下一行 */
   .life-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
   .life-stat span { font-size: var(--fs-2xs); letter-spacing: 0; }
+  /* 技能：完整卡片单列；紧凑网格锁两列（三列每格只剩 ~110px，名字会被挤断） */
   .skill-grid { grid-template-columns: 1fr; }
+  .skill-grid.mini { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
+  /* 浮层在窄屏贴底弹（拇指够得着），并且不再贴边留大留白 */
+  .smodal { padding: var(--s2); align-items: end; }
+  .smodal-box { padding: var(--s4); max-height: 88vh; }
+  .save-path { padding: var(--s3); }
+  .sp-row > span:first-child { width: 54px; }
   /* 文字编辑区在窄屏改单列：两列时输入框被挤到没法用 */
   .tx-edit { grid-template-columns: 1fr; }
   /* iOS Safari 对字号 < 16px 的输入框会在聚焦时自动放大整页 —— 必须给够 16px。

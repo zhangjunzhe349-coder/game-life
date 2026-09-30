@@ -202,13 +202,9 @@
     ];
   }
 
-  /* 一键应用技能篇 / 属性篇预设 */
-  GL.applyDocPreset = function () {
-    GL.state.skills = docSkills();
-    GL.state.attributes = docAttributes();
-    GL.state.physiology.fields = docFields();
-    GL.save();
-  };
+  /* 一键写入《技能篇》预设的能力仍保留在 docSkills / docAttributes / docFields，
+     但设置页那张「技能篇预设」卡已按用户要求撤掉（属于与用户体验无关的信息），
+     旧入口 GL.applyDocPreset 随之删除 —— 留在仓里就是死代码。 */
 
   function defaults() {
     return {
@@ -437,6 +433,78 @@
     return GL.fmtClock(t);
   };
 
+  /* ============================================================
+     导出位置说明
+     ------------------------------------------------------------
+     浏览器的硬限制：网页**读不到下载目录**（沙箱），所以这里给的
+     不是真实路径，而是「该平台默认会落到哪 + 怎么找到它」。
+     用户诉求原文：「导出备份的时候要显示一下导出的路径，不然用户找不到」——
+     在纯网页条件下，这已经是能做到的上限（真实路径必须动原生工程）。
+     参考：安卓 App（Capacitor）里额外叠一层系统分享，让用户自己选位置。
+     ============================================================ */
+  GL.isNativeApp = () => !!(window.Capacitor
+    && typeof window.Capacitor.isNativePlatform === 'function'
+    && window.Capacitor.isNativePlatform());
+
+  GL.saveLocation = function () {
+    const ua = navigator.userAgent;
+    if (GL.isNativeApp()) {
+      return {
+        path: '手机内部存储/Download/',
+        how: '这是安卓 App：点导出会先弹<b>系统分享面板</b>，选「保存到文件」就能自己挑位置；'
+          + '若直接下载，则落到上面那个下载目录。',
+        share: true,
+      };
+    }
+    if (/Android/i.test(ua)) {
+      return {
+        path: '手机内部存储/Download/',
+        how: '打开「文件管理 → 内部存储 → Download」按文件名找；也可以用浏览器的下载记录直接打开。',
+      };
+    }
+    if (/iPhone|iPad|iPod/i.test(ua)) {
+      return {
+        path: '「文件」App → 下载',
+        how: 'Safari 的下载会进「文件」App，打开后在「下载」里按文件名找（iCloud 开启则可能落在云盘）。',
+      };
+    }
+    if (/Macintosh|Mac OS X/i.test(ua)) {
+      return { path: '~/Downloads', how: '访达 → 左侧「下载」；按 ⌥⌘L 也能直接跳过去。' };
+    }
+    if (/Windows/i.test(ua)) {
+      return {
+        path: '%USERPROFILE%\\Downloads',
+        how: '即 <b>C:\\Users\\你的用户名\\Downloads</b>。资源管理器左侧点「下载」，'
+          + '或把上面的路径复制到地址栏回车，可直接跳到该文件夹。',
+      };
+    }
+    return { path: '~/Downloads（浏览器默认下载目录）', how: '浏览器下载记录里点一下就能打开所在文件夹。' };
+  };
+
+  /* ---------- 复制到剪贴板 ----------
+     「跳转到文件夹」这件事网页做不到，退而求其次必须保证「复制路径」真的能用：
+     navigator.clipboard 只在安全上下文可用（https / localhost），
+     局域网 http 下是 undefined —— 所以必须有 execCommand 兜底，否则按钮静默失效。 */
+  GL.copy = function (text) {
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;top:-1000px;left:0;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch (e) { return false; }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(() => true, fallback);
+    }
+    return Promise.resolve(fallback());
+  };
+
   /* ---------- 技能等级 ---------- */
   GL.skillLevel = function (skill) {
     const per = Math.max(1, skill.xpPerLevel || 100);
@@ -511,14 +579,27 @@
     return Math.round(items.reduce((s, a) => s + pctOf(a), 0) / items.length);
   };
 
-  /* 总览分：**负向指标取反**后再平均。
-     否则「熵值低（这是好事）」会把总分拉低，读起来像状态变差了 ——
-     这是负向指标最容易踩的统计陷阱。 */
+  /* 单项得分：**负向指标取反**后再算。
+     否则「熵值低（这是好事）」会算成低分，读起来像状态变差了 ——
+     这是负向指标最容易踩的统计陷阱。
+     顶栏「电量」与总览分都建立在它之上，保证两处口径完全一致
+     （v1.8.2 起抽出来公用，别再各写一份）。 */
+  GL.attrScore = (a) => (a.polarity === 'neg' ? 100 - pctOf(a) : pctOf(a));
+
+  /* 某一分组的平均状态（同样按极性反转）。
+     顶栏「电量」取的是生理值组 physio —— 用户原话：
+     「加一个当前电量，一个电池，这个跟踪底下的生理值」。 */
+  GL.groupScore = function (groupId) {
+    const items = GL.state.attributes.filter((a) => (a.group || 'physio') === groupId);
+    if (!items.length) return null;
+    return Math.round(items.reduce((s, a) => s + GL.attrScore(a), 0) / items.length);
+  };
+
+  /* 全部属性的总览分（14 项均值，负向取反） */
   GL.overallScore = function () {
     const arr = GL.state.attributes;
     if (!arr.length) return 0;
-    const sum = arr.reduce((s, a) => s + (a.polarity === 'neg' ? 100 - pctOf(a) : pctOf(a)), 0);
-    return Math.round(sum / arr.length);
+    return Math.round(arr.reduce((s, a) => s + GL.attrScore(a), 0) / arr.length);
   };
 
   /* 某种极性在组内是否占多数 —— 决定组标题的着色 */

@@ -6,12 +6,17 @@
       （v1.8.1 起 tools/verify-portrait.js 随立绘一起删除，
         原先由它盯的「立绘是否画出来」不再需要，但「立绘不得复活」
         这条反向断言挪到了本文件第 3 节）
+      （v1.8.2 起同理：设置页撤掉的「技能篇预设 / 版本与回滚 / 安装到桌面」
+        也不得复活，见第 3b 节）
    ============================================================ */
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+/* 这两个源码文件在多处被检查，统一在最前面读一次（避免在使用点之后才 const 声明） */
+const app = fs.readFileSync(path.join(ROOT, 'js', 'app.js'), 'utf8');
+const storageSrc = fs.readFileSync(path.join(ROOT, 'js', 'storage.js'), 'utf8');
 
 const problems = [];
 const ok = [];
@@ -106,6 +111,26 @@ if (fs.existsSync(path.join(ROOT, 'js', 'portrait.js'))) {
   problems.push('js/portrait.js 又回来了 —— v1.8.1 已确认移除中央立绘，若确实要恢复请连带改 index.html / sw.js / 本文件');
 } else {
   ok.push('js/portrait.js 已不在仓中（立绘整体移除）');
+}
+
+/* ---------- 3b. 设置页已撤掉的三张卡不得复活（v1.8.2） ----------
+   用户原话：「技能篇预设这个模块去掉，版本与回滚也是，这都属于和用户体验无关的信息，
+   还有安装到桌面也去掉，关于可以保留」。
+   判据只认**按钮 id 与代码符号**，不认卡片标题 ——
+   标题字符串在改动说明的注释里会自然出现（本文件与 app.js 都写了原因），
+   拿它当判据会把注释一起判成违规。
+   实际渲染出来的卡片张数由第 ③ 层 browser-check 在真 DOM 上数（那边没有注释污染）。 */
+const PRESET_GONE = ['btn-preset'];
+const presetRevived = PRESET_GONE.filter((id) => html.indexOf('id="' + id + '"') !== -1)
+  .concat(PRESET_GONE.filter((id) => app.indexOf("'" + id + "'") !== -1));
+if (presetRevived.length) {
+  problems.push(`设置页又出现了已撤掉的入口：${[...new Set(presetRevived)].join('、')} —— ` +
+    '技能篇预设已按用户要求移出设置页，若要恢复请连带更新 README 与 browser-check 的断言');
+}
+if (/GL\.applyDocPreset\s*=/.test(storageSrc)) {
+  problems.push('storage.js 里又定义了 GL.applyDocPreset —— 设置页入口已撤销，留着就是死代码');
+} else {
+  ok.push('设置页已撤掉的三张卡（技能篇预设 / 版本与回滚 / 安装到桌面）确认未复活');
 }
 
 /* ---------- 4. 被移除节点不得再被 JS 引用 ---------- */
@@ -211,7 +236,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 15;   // v1.8.1：移除中央立绘（删 js/portrait.js、index.html 改布局、avatar.js 收缩、css 重排），资源有变必须 ≥ v15
+const MIN_SW_VER = 16;   // v1.8.2：顶栏读数重做 + 设置页瘦身 + 技能改紧凑网格/浮层（js 与 css 都有改动），资源有变必须 ≥ v16
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 
@@ -229,7 +254,6 @@ else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥
 if (/cache:\s*'reload'/.test(sw)) ok.push('SW 装缓存时绕开 HTTP 缓存（cache: reload），新缓存不会装进旧文件');
 else problems.push('sw.js 装缓存没有用 cache: \'reload\' —— 会走 HTTP 缓存，升级后新缓存里可能仍是旧文件，用户界面看不到变化');
 
-const app = fs.readFileSync(path.join(ROOT, 'js', 'app.js'), 'utf8');
 if (/updateViaCache:\s*'none'/.test(app)) ok.push('注册 SW 时 updateViaCache: none（脚本本身不吃 HTTP 缓存，否则更新检查永远拿到旧字节，新 SW 装不上）');
 else problems.push('app.js 注册 SW 时没写 updateViaCache: none —— sw.js 自己会被 HTTP 缓存住，浏览器会认定「没有新版」');
 if (/reg\.update\(\)/.test(app)) ok.push('每次打开主动查一次 SW 更新（reg.update）');

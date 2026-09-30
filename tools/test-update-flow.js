@@ -155,6 +155,12 @@ const MARKS = `(async () => {
        旧版 v1.8.0 只有 stage-base，没有 .pf-field —— 所以它同时是「新版真的生效」的判据。 */
     pfFields: pf ? pf.querySelectorAll('.pf-field').length : -1,
     portraitGone: !document.getElementById('portrait-svg'),
+    /* v1.8.2 的两条「新代码真的跑起来了」判据：
+       设置页只剩 2 张卡、技能默认是 13 个紧凑小卡。
+       它们与 VERSION 字符串是两回事 —— 版本号只要改了那一个常量就会变，
+       而这两条要求 app.js / skills.js / css 全都换成新版。 */
+    settingsCards: document.querySelectorAll('#panel-settings .card').length,
+    skTiles: document.querySelectorAll('.sk-tile').length,
     controlled: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
     ctrlName: (navigator.serviceWorker && navigator.serviceWorker.controller)
       ? navigator.serviceWorker.controller.scriptURL.split('/').pop() : null,
@@ -445,6 +451,10 @@ self.addEventListener('activate', () => {
     /* v1.8.1 的换版判据：立绘没了、个人信息条在。
        光看 VERSION 字符串只能证明「文档换了」，这两条才能证明「新代码真的跑起来了」。 */
     check(m1.portraitGone === true, `中央立绘已随之移除（#portrait-svg 不存在：${m1.portraitGone}）`);
+    /* v1.8.2 判据：新版的两处结构性改动都在（设置页瘦身 + 技能紧凑小卡）。
+       不用 VERSION 字符串 —— 那条只证明「文档换了」。 */
+    check(m1.settingsCards === 2 && m1.skTiles === 13,
+      `v1.8.2 新代码确实跑起来了（设置页 ${m1.settingsCards} 张卡 / 技能 ${m1.skTiles} 个小卡）`);
     check(m1.pfFields === 4, `个人信息 4 组字段已渲染（实测 ${m1.pfFields} 组）`);
     /* 这里断言的是**要求**（页头必须留出状态栏空间），不是**变化** ——
        早先写成「必须比旧版更大」，一旦拿 v1.7.4 当旧版（它已经有这条留白）

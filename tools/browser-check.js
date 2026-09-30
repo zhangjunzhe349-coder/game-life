@@ -224,6 +224,21 @@ function check(ok, label, detail) {
       rvIn: document.querySelectorAll('.rv.in').length,
       cardCount: document.querySelectorAll('.card').length,
       tabCount: document.querySelectorAll('.tab').length,
+      /* v1.8.2 顶栏读数：必须正好三格（剩余生命 · 年龄 · 电量）+ 一个电池图形。
+         这三格是用户点名要的：删掉记录天数 / 累计经验 / 状态均值，
+         加「年龄（精确到天）」与「一个电池，跟踪生理值」。 */
+      readoutCount: document.querySelectorAll('#hud-readouts .readout').length,
+      readoutLabels: Array.from(document.querySelectorAll('#hud-readouts .readout > span')).map((s) => s.textContent).join('/'),
+      /* 注意用 \\s：这一段是塞在模板字符串里的，写单反斜杠会被模板字符串吃成 "s"，
+         正则就变成了 /s+/g（实测把诊断信息里的空格留着没删，排查时误导过一轮）。 */
+      readoutText: Array.from(document.querySelectorAll('#hud-readouts .readout')).map((r) => r.textContent.replace(/\\s+/g, '')).join('/'),
+      hasBatt: !!document.querySelector('#hud-readouts .batt'),
+      battLen: document.querySelectorAll('#hud-readouts .batt rect').length,
+      lifeAge: (() => { try { const i = gl.lifeInfo(); return i.ageY + '岁' + i.ageD + '天'; } catch (e) { return null; } })(),
+      battScore: (() => { try { return gl.groupScore('physio'); } catch (e) { return null; } })(),
+      /* v1.8.2 设置页：只剩「数据管理」与「关于」两张卡，且带导出结果容器 */
+      settingsCards: document.querySelectorAll('#panel-settings .card').length,
+      settingsExportBox: !!document.getElementById('export-result'),
       injectedAttrs: document.querySelectorAll('[data-page-node-id]').length,
       attrGroups: groups.length,
       attrRows: rows.length,
@@ -245,10 +260,15 @@ function check(ok, label, detail) {
         return gid + '(' + mean + ') ' + items.join(' / ');
       }),
       skillGroups: document.querySelectorAll('.sg').length,
-      skillCards: document.querySelectorAll('.skill').length,
-      skillNoteBtns: document.querySelectorAll('.skill-note-btn').length,
-      skillSubCount: document.querySelectorAll('.skill-sub').length,
-      skillNoteTxtCount: document.querySelectorAll('.skill-note-txt').length,
+      /* v1.8.2：技能默认渲染成**紧凑小卡**（.sk-tile：图标 + 名称 + 等级 + 经验条）；
+         完整卡片（.skill-full）只在点开的浮层里或「展开全部」之后才出现。
+         两类分别数 —— 混着数就分不清「默认收着」和「默认铺开」这两件相反的事。 */
+      skillTiles: document.querySelectorAll('.sk-tile').length,
+      skillFull: document.querySelectorAll('.skill-full').length,
+      skillExpandBtn: !!document.getElementById('sk-expand'),
+      /* 小字在数据层仍是 3 项（肌肉量 / 表达能力 / small talk）——
+         紧凑模式下它不占卡片面积，改在浮层里呈现，所以按 state 数而不是按 DOM 数 */
+      skillSubsInState: ((gl.state && gl.state.skills) || []).filter((s) => s.sub).length,
       /* v1.6.0：小字必须与用户原文逐字一致，抽查几项最容易被压缩的 */
       subMove: (gl.state && (gl.state.attributes.find((a) => a.id === 'move') || {}).sub) || null,
       noteDiet: (gl.state && (gl.state.attributes.find((a) => a.id === 'diet') || {}).note) || null,
@@ -319,7 +339,34 @@ function check(ok, label, detail) {
   check(S.rvTotal > 0 && S.rvIn === S.rvTotal, '入场动画元素全部点亮（.rv.in == .rv）',
     `${S.rvIn}/${S.rvTotal} —— 不相等说明 reveal() 未跑完，页面会白屏`);
   check(S.docH > 900, '页面有正常内容高度', `${S.docH}px`);
-  check(S.cardCount >= 5, '卡片已渲染', `${S.cardCount} 张`);
+  /* 设置页从 5 张卡减到 2 张（v1.8.2），阈值跟着下调 ——
+     这条的本意只是「卡片渲染了、不是空白壳」，精确张数由下面那条管。 */
+  check(S.cardCount >= 4, '卡片已渲染', `${S.cardCount} 张`);
+
+  /* ---------- 顶栏读数（v1.8.2 重做）----------
+     用户点名：「记录天数不要了，累计经验页不要了，状态均值也不要了，
+     加一个年龄，要精确到天的那种，还有当前显示当前电量，一个电池，
+     这个跟踪底下的生理值」。这几条就是把这句话钉死：
+     少一格 = 没做完，多一格 = 没删干净；电量必须与生理值组同源，
+     不能是另算一套的漂亮数字。 */
+  check(S.readoutCount === 3, '顶栏正好三格读数（剩余生命 / 年龄 / 电量）', `实际 ${S.readoutCount} 格`);
+  check(S.readoutLabels === '剩余生命/年龄/电量', '三格的标签与新设计一致', `实际「${S.readoutLabels}」`);
+  check(!/记录天数|累计经验|状态均值/.test(S.readoutText),
+    '已删掉的三格（记录天数 / 累计经验 / 状态均值）没有残留', `实际「${S.readoutText}」`);
+  check(!!S.lifeAge && S.readoutText.indexOf(S.lifeAge) !== -1,
+    '年龄精确到天，且读数与 lifeInfo() 一致',
+    `读数额「${S.readoutText}」/ lifeInfo「${S.lifeAge}」`);
+  check(S.hasBatt === true, '顶栏有一个电池图形（.batt）');
+  check(S.battLen >= 3, '电池是画出来的（外框 + 正极帽 + 电量条）', `实际 ${S.battLen} 块`);
+  check(S.battScore !== null && S.readoutText.indexOf(S.battScore + '%') !== -1,
+    "电量与 GL.groupScore('physio') 同源（跟踪生理值组，不是另算一套）",
+    `电池读数「${S.readoutText}」/ groupScore ${S.battScore}`);
+
+  /* ---------- 设置页瘦身（v1.8.2）----------
+     判据放在**真 DOM** 上而不是源码上：撤掉的那三张卡的标题
+     在改动说明的注释里会自然出现，拿字符串去 grep 源码会误报。 */
+  check(S.settingsCards === 2, '设置页只剩两张卡（数据管理 / 关于）', `实际 ${S.settingsCards} 张`);
+  check(S.settingsExportBox === true, '数据管理里有导出结果容器（导出后要显示文件去哪了）');
 
   /* ---------- 电子衣橱（v1.8.0 照片版 / v1.8.1 去立绘）----------
      静态检查全都看不出「页面能看、点不动」，所以这一段**必须真点一遍**：
@@ -409,7 +456,9 @@ function check(ok, label, detail) {
   check(S.attrMidRows === 2, '双向行 2 个（社交度、稳定度）', `实际 ${S.attrMidRows}`);
   check(S.overall !== null && S.overall > 0, 'GL.overallScore() 可用', `实际 ${S.overall}`);
   check(S.skillGroups === 5, '技能页渲染 5 个分组', `实际 ${S.skillGroups} —— 注意技能在独立 tab，需确认已渲染`);
-  check(S.skillCards === 13, '技能卡片 13 张', `实际 ${S.skillCards}`);
+  check(S.skillTiles === 13, '技能默认渲染成 13 个紧凑小卡（图标 + 名称 + 等级 + 经验条）', `实际 ${S.skillTiles}`);
+  check(S.skillFull === 0, '紧凑模式下没有铺开的完整卡片（面积就是这么省下来的）', `实际 ${S.skillFull}`);
+  check(S.skillExpandBtn === true, '技能页有「展开全部 / 收拢全部」按钮');
 
   /* ---------- 小字照录原文 + 可编辑入口（v1.6.0） ---------- */
   check(S.attrHasSub === 5, '属性小字渲染 5 处（原文里带括号的 5 项）', `实际 ${S.attrHasSub}`);
@@ -421,8 +470,7 @@ function check(ok, label, detail) {
     '技能名按原文照录：small talk闲聊能力', `实际 ${S.nameSmalltalk}`);
   check(S.subMuscle === '（细狗——匀称——薄肌）',
     '技能小字按原文照录：肌肉量', `实际 ${S.subMuscle}`);
-  check(S.skillSubCount === 3, '技能小字渲染 3 处（肌肉量 / 表达能力 / small talk）', `实际 ${S.skillSubCount}`);
-  check(S.skillNoteBtns === 13, '每张技能卡片都有注释入口', `实际 ${S.skillNoteBtns}`);
+  check(S.skillSubsInState === 3, '技能小字仍是 3 项（肌肉量 / 表达能力 / small talk）', `实际 ${S.skillSubsInState}`);
 
   /* ---------- 出图 ---------- */
   let shotPaths = [];
@@ -669,30 +717,56 @@ function check(ok, label, detail) {
       if (pick('.ag-row[data-aid="throat"]')) { pick('.ag-row[data-aid="throat"]').click(); await sleep(300); }
     }
 
-    // ⑥ 技能注释栏：点开可编辑，说明写进 state 并渲染到卡片
-    const nb = pick('.skill-note-btn');
-    out.noteBtnFound = !!nb;
-    if (nb) {
-      const sid = nb.dataset.noteToggle;
-      nb.click(); await sleep(350);
-      const box = pick('.skill[data-sid="' + sid + '"] .tx-edit');
-      out.skillTxBox = !!box;
-      const ta = box ? box.querySelector('[data-skill-note]') : null;
-      if (ta) {
-        ta.value = '测试说明';
-        ta.dispatchEvent(new Event('change', { bubbles: true }));
-        await sleep(250);
-        out.skillNoteAfter = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
-        const txt = pick('.skill[data-sid="' + sid + '"] .skill-note-txt');
-        out.skillNoteDom = txt ? txt.textContent : null;
-        const back = pick('.skill[data-sid="' + sid + '"] [data-skill-note]');
-        if (back) {
-          back.value = '';
-          back.dispatchEvent(new Event('change', { bubbles: true }));
+    // ⑥ 技能：默认紧凑小卡 → 点开弹浮层看完整信息 → 编辑注释（写 state + 就地渲染）
+    //    v1.8.2 起完整信息只在浮层里（或「展开全部」之后），所以必须先点开小卡再操作。
+    const tile = pick('.sk-tile');
+    out.tileFound = !!tile;
+    if (tile) {
+      const sid = tile.dataset.sid;
+      tile.click(); await sleep(400);
+      const modalEl = document.getElementById('skill-modal');
+      out.modalOpen = !!modalEl && !modalEl.hidden;
+      out.modalHasDetail = !!(modalEl && modalEl.querySelector('.smodal-body .skill-full[data-sid="' + sid + '"]'));
+      out.modalHasAddBtn = !!(modalEl && modalEl.querySelector('.add-btn'));
+      out.modalHasNoteBtn = !!(modalEl && modalEl.querySelector('.skill-note-btn'));
+      out.modalLocksScroll = document.body.classList.contains('modal-open');
+      const nb = pick('#skill-modal .skill-note-btn');
+      if (nb) {
+        nb.click(); await sleep(350);
+        const box = pick('#skill-modal .skill[data-sid="' + sid + '"] .tx-edit');
+        out.skillTxBox = !!box;
+        const ta = box ? box.querySelector('[data-skill-note]') : null;
+        if (ta) {
+          ta.value = '测试说明';
+          ta.dispatchEvent(new Event('change', { bubbles: true }));
           await sleep(250);
+          out.skillNoteAfter = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
+          const txt = pick('#skill-modal .skill[data-sid="' + sid + '"] .skill-note-txt');
+          out.skillNoteDom = txt ? txt.textContent : null;
+          out.noteInputStillConnected = ta.isConnected;   // 就地刷新，不整页重渲染
+          const back = pick('#skill-modal .skill[data-sid="' + sid + '"] [data-skill-note]');
+          if (back) {
+            back.value = '';
+            back.dispatchEvent(new Event('change', { bubbles: true }));
+            await sleep(250);
+          }
+          out.skillNoteRestored = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
         }
-        out.skillNoteRestored = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
       }
+      const closeHit = pick('#skill-modal [data-smodal-close]');
+      if (closeHit) { closeHit.click(); await sleep(300); }
+      const m2 = document.getElementById('skill-modal');
+      out.modalClosed = !!m2 && m2.hidden;
+    }
+
+    // ⑦ 一键收放：展开全部 → 13 张完整卡 / 0 小卡；再点 → 13 小卡 / 0 完整卡
+    if (pick('#sk-expand')) {
+      pick('#sk-expand').click(); await sleep(400);
+      out.fullAfterExpand = document.querySelectorAll('.skill-full').length;
+      out.tilesAfterExpand = document.querySelectorAll('.sk-tile').length;
+      if (pick('#sk-expand')) { pick('#sk-expand').click(); await sleep(400); }
+      out.tilesAfterCollapse = document.querySelectorAll('.sk-tile').length;
+      out.fullAfterCollapse = document.querySelectorAll('.skill-full').length;
     }
 
     return out;
@@ -727,12 +801,27 @@ function check(ok, label, detail) {
     check(inter.inputStillConnected === true,
       '编辑：输入框未被重渲染替换（说明编辑时不会丢焦点）');
     check(inter.subRestored === inter.origSub, '编辑：还原后小字回到原文', String(inter.subRestored));
-    /* 技能注释栏 */
-    check(inter.noteBtnFound === true, '编辑：技能卡片有注释入口', String(inter.noteBtnFound));
+    /* 技能：紧凑小卡 → 浮层详情（v1.8.2） */
+    check(inter.tileFound === true, '技能：找得到紧凑小卡');
+    check(inter.modalOpen === true, '技能：点小卡弹出详情浮层');
+    check(inter.modalHasDetail === true, '技能：浮层里是**该项**的完整卡片（不是别人的）');
+    check(inter.modalHasAddBtn === true, '技能：浮层里有「＋ 加经验」入口');
+    check(inter.modalHasNoteBtn === true, '技能：浮层里有注释入口');
+    check(inter.modalLocksScroll === true, '技能：浮层打开时锁住背景滚动');
+    check(inter.modalClosed === true, '技能：点遮罩能单独关掉浮层');
     check(inter.skillTxBox === true, '编辑：点开技能注释后出现编辑区');
     check(inter.skillNoteAfter === '测试说明', '编辑：技能说明写入 state', String(inter.skillNoteAfter));
     check(inter.skillNoteDom === '测试说明', '编辑：技能说明即时渲染到卡片', String(inter.skillNoteDom));
+    check(inter.noteInputStillConnected === true,
+      '编辑：浮层里的输入框未被重渲染替换（编辑说明时不丢焦点与已输入内容）');
     check(inter.skillNoteRestored === '', '编辑：清空后说明被移除', String(inter.skillNoteRestored));
+    /* 一键收放（展开 / 收拢集成在一个按钮里） */
+    check(inter.fullAfterExpand === 13 && inter.tilesAfterExpand === 0,
+      '技能：点「展开全部」→ 13 张完整卡片、0 个小卡',
+      `完整 ${inter.fullAfterExpand} / 小卡 ${inter.tilesAfterExpand}`);
+    check(inter.tilesAfterCollapse === 13 && inter.fullAfterCollapse === 0,
+      '技能：再点「收拢全部」→ 回到 13 个小卡',
+      `小卡 ${inter.tilesAfterCollapse} / 完整 ${inter.fullAfterCollapse}`);
   } else {
     check(false, '交互：测试脚本执行失败', inter && inter.__err ? String(inter.__err).slice(0, 120) : '未知');
   }
