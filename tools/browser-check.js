@@ -201,6 +201,43 @@ function check(ok, label, detail) {
     const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; };
     const rows = document.querySelectorAll('.ag-row');
     const groups = document.querySelectorAll('.ag');
+    /* v1.8.2：emoji 豆腐块探测（地面真值）—— 提到 return 前面算，
+       好把「探到了几个字符」一起带出来：命中数为 0 也可能是「一个字符都没探到」，
+       那不是通过，是没测（橡皮图章）。 */
+    const emojiProbe = (() => {
+      try {
+        const nodes = document.querySelectorAll('.skill-emoji, .ag-glyph, .sg-glyph, .card-title, .tab, nav a');
+        const probe = document.querySelector('.skill-emoji') || document;
+        const fam = getComputedStyle(probe).fontFamily || 'sans-serif';
+        const cv = document.createElement('canvas');
+        cv.width = 72; cv.height = 72;
+        const ctx = cv.getContext('2d');
+        const font = '48px ' + fam;
+        const draw = (ch) => {
+          ctx.clearRect(0, 0, 72, 72);
+          ctx.font = font; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff';
+          ctx.fillText(ch, 6, 6);
+          return cv.toDataURL();
+        };
+        const ref = draw(String.fromCodePoint(0x10FFFF));
+        const set = new Set();
+        nodes.forEach((el) => {
+          const t = el.textContent || '';
+          for (const ch of t) {
+            const cp = ch.codePointAt(0);
+            if (cp > 0x2000 && cp !== 0xFE0F && cp !== 0x200D && !String(ch).trim()) continue;
+            if (cp > 0x2000 && cp < 0x10000 || cp >= 0x1F000) set.add(ch);
+          }
+        });
+        const bad = [];
+        set.forEach((ch) => {
+          if (draw(ch) === ref) {
+            bad.push(ch + ' U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
+          }
+        });
+        return { bad: bad, probed: set.size };
+      } catch (e) { return { bad: ['（探测异常：' + e.message + '）'], probed: -1 }; }
+    })();
     return {
       hasGL: !!window.GL,
       version: gl.VERSION || null,
@@ -261,13 +298,13 @@ function check(ok, label, detail) {
       }),
       skillGroups: document.querySelectorAll('.sg').length,
       /* v1.8.2：技能默认渲染成**紧凑小卡**（.sk-tile：图标 + 名称 + 等级 + 经验条）；
-         完整卡片（.skill-full）只在点开的浮层里或「展开全部」之后才出现。
+         完整卡片（.skill-full）只在点开（就地展开）或「展开全部」之后才出现。
          两类分别数 —— 混着数就分不清「默认收着」和「默认铺开」这两件相反的事。 */
       skillTiles: document.querySelectorAll('.sk-tile').length,
       skillFull: document.querySelectorAll('.skill-full').length,
       skillExpandBtn: !!document.getElementById('sk-expand'),
       /* 小字在数据层仍是 3 项（肌肉量 / 表达能力 / small talk）——
-         紧凑模式下它不占卡片面积，改在浮层里呈现，所以按 state 数而不是按 DOM 数 */
+         紧凑模式下它不占卡片面积，改在展开的完整卡里呈现，所以按 state 数而不是按 DOM 数 */
       skillSubsInState: ((gl.state && gl.state.skills) || []).filter((s) => s.sub).length,
       /* v1.6.0：小字必须与用户原文逐字一致，抽查几项最容易被压缩的 */
       subMove: (gl.state && (gl.state.attributes.find((a) => a.id === 'move') || {}).sub) || null,
@@ -290,48 +327,9 @@ function check(ok, label, detail) {
         return i ? i.naturalWidth : -1;
       })(),
       firstGroupMean: document.querySelector('.ag-mean') ? document.querySelector('.ag-mean').textContent : null,
-      /* v1.8.2：emoji 豆腐块探测（地面真值）。
-         起因：技能「心肺」用的 🫁（U+1FAC1，Emoji 13.0）在本机与老设备上缺字形，
-         界面上就是一个空方框；截图能看出来，但静态检查看不出来。
-         做法：把每个可见 emoji 画进 canvas（字体用元素的实际 computed font-family），
-         与「必然缺失」的参考字符 U+10FFFF 的位图逐字节比对 —— 位图相同即同一个字形，
-         也就说明这个字符是豆腐块。比量宽度可靠（宽度可能撞巧，位图不会）。
-         ⚠ 模板字符串里反斜杠转义会掉一层，所以这里刻意不用正则、改用码点数值比较。 */
-      emojiTofu: (() => {
-        try {
-          const nodes = document.querySelectorAll('.skill-emoji, .ag-glyph, .sg-glyph, .card-title, .tab, nav a');
-          const probe = document.querySelector('.skill-emoji') || document;
-          const fam = getComputedStyle(probe).fontFamily || 'sans-serif';
-          const cv = document.createElement('canvas');
-          cv.width = 72; cv.height = 72;
-          const ctx = cv.getContext('2d');
-          const font = '48px ' + fam;
-          const draw = (ch) => {
-            ctx.clearRect(0, 0, 72, 72);
-            ctx.font = font; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff';
-            ctx.fillText(ch, 6, 6);
-            return cv.toDataURL();
-          };
-          const refCh = String.fromCodePoint(0x10FFFF);
-          const ref = draw(refCh);
-          const set = new Set();
-          nodes.forEach((el) => {
-            const t = el.textContent || '';
-            for (const ch of t) {
-              const cp = ch.codePointAt(0);
-              if (cp > 0x2000 && cp !== 0xFE0F && cp !== 0x200D && !String(ch).trim()) continue;
-              if (cp > 0x2000 && cp < 0x10000 || cp >= 0x1F000) set.add(ch);
-            }
-          });
-          const bad = [];
-          set.forEach((ch) => {
-            if (draw(ch) === ref) {
-              bad.push(ch + ' U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
-            }
-          });
-          return bad;
-        } catch (e) { return ['（探测异常：' + e.message + '）']; }
-      })(),
+      /* 豆腐块探测的详细做法见上面 return 之前的 emojiProbe；这里只带出结果与样本数 */
+      emojiTofu: emojiProbe.bad,
+      emojiProbed: emojiProbe.probed,
     };
   })()`.replace('__ERRS__', JSON.stringify(pageErrors)));
 
@@ -504,6 +502,10 @@ function check(ok, label, detail) {
   check(Array.isArray(S.emojiTofu) && S.emojiTofu.length === 0,
     'emoji：界面上没有渲染成豆腐块空框的字符（位图与「必然缺失」参考字符比对）',
     `检出 ${JSON.stringify(S.emojiTofu)}`);
+  /* 防「空集合躺赢」：一个字符都没probe到，上面那条也会绿 —— 那不是通过，是没测。 */
+  check(S.emojiProbed >= 20,
+    'emoji：探测确实覆盖了界面上的字符（技能 13 + 分组 5 + 属性 14 + 页签等）',
+    `probe 到 ${S.emojiProbed} 个字符`);
 
   /* ---------- 小字照录原文 + 可编辑入口（v1.6.0） ---------- */
   check(S.attrHasSub === 5, '属性小字渲染 5 处（原文里带括号的 5 项）', `实际 ${S.attrHasSub}`);
@@ -565,8 +567,37 @@ function check(ok, label, detail) {
       fs.writeFileSync(p, Buffer.from(s.data, 'base64'));
       shotPaths.push(p);
     }
-    // 回到总览页，避免影响后续
-    await ev(`(() => { const b = document.querySelector('.tab[data-tab="hud"]'); if (b) b.click(); })()`);
+    /* 技能「就地展开」单独出图（v1.8.2）：点第一张小卡 → 完整卡占满整行、
+       后面的小卡被挤到下一行。这张图是「挤出空间」最直观的证据 ——
+       断言能证明宽度与位移，只有图能证明「看起来是对的」。 */
+    const openInfo = await ev(`(() => {
+      const b = document.querySelector('.tab[data-tab="skills"]');
+      if (b) b.click();
+      const t = document.querySelector('#panel-skills .sk-tile');
+      if (!t) return null;
+      t.click();
+      const card = document.querySelector('#panel-skills .skill-full');
+      if (!card) return null;
+      const g = card.parentElement;
+      const y = g.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo(0, Math.max(0, y - 70));
+      return { cardW: Math.round(card.getBoundingClientRect().width), gridW: g.clientWidth };
+    })()`);
+    await new Promise((r) => setTimeout(r, 800));
+    const s3 = await send('Page.captureScreenshot', { format: 'png' });
+    const p3 = path.join(ROOT, 'tools', 'browser-shot-skills-open.png');
+    fs.writeFileSync(p3, Buffer.from(s3.data, 'base64'));
+    shotPaths.push(p3);
+    if (openInfo && openInfo.gridW) {
+      console.log(`  · 技能就地展开：完整卡 ${openInfo.cardW}px / 网格 ${openInfo.gridW}px`);
+    }
+
+    // 回到总览页，避免影响后续（顺便把刚才展开的那张收起）
+    await ev(`(() => {
+      const x = document.querySelector('#panel-skills .skill-full [data-skill-close]');
+      if (x) x.click();
+      const b = document.querySelector('.tab[data-tab="hud"]'); if (b) b.click();
+    })()`);
   }
 
   /* ---------- 生命刻度：格子固定大小 + 列数随容器宽度自适应（v1.6.1） ----------
@@ -762,34 +793,63 @@ function check(ok, label, detail) {
       if (pick('.ag-row[data-aid="throat"]')) { pick('.ag-row[data-aid="throat"]').click(); await sleep(300); }
     }
 
-    // ⑥ 技能：默认紧凑小卡 → 点开弹浮层看完整信息 → 编辑注释（写 state + 就地渲染）
-    //    v1.8.2 起完整信息只在浮层里（或「展开全部」之后），所以必须先点开小卡再操作。
+    // ⑥ 技能：默认紧凑小卡 → 点卡**就地展开**完整信息 → 编辑注释 → 收起
+    //    v1.8.2 起完整信息是就地展开的（用户：「技能打开不要浮窗，直接展开，挤出空间」），
+    //    完整卡长在 #panel-skills 里、占满整行把后面的小卡挤下去，**不存在任何浮层宿主**。
+    //    ⚠ 量宽度之前必须先把技能页签点开 —— 隐藏面板的 clientWidth 恒为 0，
+    //      上一版就是在隐藏状态下量的，量出来 undefined（元素的 rect 全是 0）。 */
+    if (pick('.tab[data-tab="skills"]')) { pick('.tab[data-tab="skills"]').click(); await sleep(400); }
     const tile = pick('.sk-tile');
     out.tileFound = !!tile;
     if (tile) {
       const sid = tile.dataset.sid;
+      const tilesBefore = document.querySelectorAll('.sk-tile').length;
       tile.click(); await sleep(400);
-      const modalEl = document.getElementById('skill-modal');
-      out.modalOpen = !!modalEl && !modalEl.hidden;
-      out.modalHasDetail = !!(modalEl && modalEl.querySelector('.smodal-body .skill-full[data-sid="' + sid + '"]'));
-      out.modalHasAddBtn = !!(modalEl && modalEl.querySelector('.add-btn'));
-      out.modalHasNoteBtn = !!(modalEl && modalEl.querySelector('.skill-note-btn'));
-      out.modalLocksScroll = document.body.classList.contains('modal-open');
-      const nb = pick('#skill-modal .skill-note-btn');
+
+      const card = pick('#panel-skills .skill-full[data-sid="' + sid + '"]');
+      out.inlineOpen = !!card;
+      out.noModalHost = document.getElementById('skill-modal') === null;
+      out.inlineHasAddBtn = !!(card && card.querySelector('.add-btn'));
+      out.inlineHasNoteBtn = !!(card && card.querySelector('.skill-note-btn'));
+      out.tilesAfterOpen = document.querySelectorAll('.sk-tile').length;
+      out.fullAfterOpen = document.querySelectorAll('.skill-full').length;
+      /* 「挤出空间」的地面真值，别只看类名：
+         ① 完整卡宽度必须≈整个网格宽（占满整行，grid-column: 1 / -1）；
+         ② 也要明显宽于同组一个小卡（万一网格只有一列，①会「躺赢」，这条补上）；
+         ③ 同组剩下的小卡必须被挤到它下方。 */
+      if (card && card.parentElement) {
+        const g2 = card.parentElement;
+        const gw = g2.clientWidth;
+        const cw = card.getBoundingClientRect().width;
+        out.gridWidth = gw;
+        out.cardWidth = Math.round(cw);
+        out.expandedSpansRow = gw > 0 && cw >= gw - 2;
+        const sibs = [...g2.querySelectorAll('.sk-tile')];
+        out.tileWidth = sibs.length ? Math.round(sibs[0].getBoundingClientRect().width) : -1;
+        out.widerThanTile = sibs.length ? cw > out.tileWidth * 1.5 : null;
+        out.pushedDown = sibs.length
+          ? sibs.every((t) => t.getBoundingClientRect().top >= card.getBoundingClientRect().bottom - 2)
+          : null;
+      }
+
+      const nb = pick('#panel-skills .skill-full[data-sid="' + sid + '"] .skill-note-btn');
       if (nb) {
         nb.click(); await sleep(350);
-        const box = pick('#skill-modal .skill[data-sid="' + sid + '"] .tx-edit');
+        const box = pick('#panel-skills .skill-full[data-sid="' + sid + '"] .tx-edit');
         out.skillTxBox = !!box;
+        /* 展开态要能熬过一次局部重画（点注释会 repaint 整个面板）——
+           熬不过去的话这里就是 0 张完整卡，注释根本没法编辑。 */
+        out.stillOpenAfterRepaint = document.querySelectorAll('.skill-full').length === 1;
         const ta = box ? box.querySelector('[data-skill-note]') : null;
         if (ta) {
           ta.value = '测试说明';
           ta.dispatchEvent(new Event('change', { bubbles: true }));
           await sleep(250);
           out.skillNoteAfter = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
-          const txt = pick('#skill-modal .skill[data-sid="' + sid + '"] .skill-note-txt');
+          const txt = pick('#panel-skills .skill-full[data-sid="' + sid + '"] .skill-note-txt');
           out.skillNoteDom = txt ? txt.textContent : null;
           out.noteInputStillConnected = ta.isConnected;   // 就地刷新，不整页重渲染
-          const back = pick('#skill-modal .skill[data-sid="' + sid + '"] [data-skill-note]');
+          const back = pick('#panel-skills .skill-full[data-sid="' + sid + '"] [data-skill-note]');
           if (back) {
             back.value = '';
             back.dispatchEvent(new Event('change', { bubbles: true }));
@@ -798,10 +858,27 @@ function check(ok, label, detail) {
           out.skillNoteRestored = (window.GL.state.skills.find((s) => s.id === sid) || {}).note;
         }
       }
-      const closeHit = pick('#skill-modal [data-smodal-close]');
-      if (closeHit) { closeHit.click(); await sleep(300); }
-      const m2 = document.getElementById('skill-modal');
-      out.modalClosed = !!m2 && m2.hidden;
+
+      /* Esc 收起 */
+      out.escClosed = false;
+      const panelEl = pick('#panel-skills');
+      if (panelEl) {
+        panelEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await sleep(300);
+        out.escClosed = document.querySelectorAll('.skill-full').length === 0;
+      }
+
+      /* 点卡上 × 单独收起：先重新展开，再用 × 关掉 */
+      const tile2 = pick('.sk-tile[data-sid="' + sid + '"]');
+      if (tile2) {
+        tile2.click(); await sleep(350);
+        out.reopened = document.querySelectorAll('.skill-full').length === 1;
+        const x = pick('#panel-skills .skill-full[data-sid="' + sid + '"] [data-skill-close]');
+        out.hasCloseBtn = !!x;
+        if (x) { x.click(); await sleep(350); }
+      }
+      out.inlineClosed = document.querySelectorAll('.skill-full').length === 0
+        && document.querySelectorAll('.sk-tile').length === tilesBefore;
     }
 
     // ⑦ 一键收放：展开全部 → 13 张完整卡 / 0 小卡；再点 → 13 小卡 / 0 完整卡
@@ -809,10 +886,15 @@ function check(ok, label, detail) {
       pick('#sk-expand').click(); await sleep(400);
       out.fullAfterExpand = document.querySelectorAll('.skill-full').length;
       out.tilesAfterExpand = document.querySelectorAll('.sk-tile').length;
+      /* 「全部展开」是批量态：收起由顶部那一个按钮统一负责，不该每张卡各挂一个 × */
+      out.fullAllNoCloseBtn = document.querySelectorAll('.skill-x').length === 0;
       if (pick('#sk-expand')) { pick('#sk-expand').click(); await sleep(400); }
       out.tilesAfterCollapse = document.querySelectorAll('.sk-tile').length;
       out.fullAfterCollapse = document.querySelectorAll('.skill-full').length;
     }
+
+    /* 收尾：把页签切回总览 —— 后面的截图与断言都按「总览页可见」来写 */
+    if (pick('.tab[data-tab="hud"]')) { pick('.tab[data-tab="hud"]').click(); await sleep(300); }
 
     return out;
   })()`);
@@ -846,19 +928,35 @@ function check(ok, label, detail) {
     check(inter.inputStillConnected === true,
       '编辑：输入框未被重渲染替换（说明编辑时不会丢焦点）');
     check(inter.subRestored === inter.origSub, '编辑：还原后小字回到原文', String(inter.subRestored));
-    /* 技能：紧凑小卡 → 浮层详情（v1.8.2） */
+    /* 技能：紧凑小卡 → 就地展开完整卡（v1.8.2） */
     check(inter.tileFound === true, '技能：找得到紧凑小卡');
-    check(inter.modalOpen === true, '技能：点小卡弹出详情浮层');
-    check(inter.modalHasDetail === true, '技能：浮层里是**该项**的完整卡片（不是别人的）');
-    check(inter.modalHasAddBtn === true, '技能：浮层里有「＋ 加经验」入口');
-    check(inter.modalHasNoteBtn === true, '技能：浮层里有注释入口');
-    check(inter.modalLocksScroll === true, '技能：浮层打开时锁住背景滚动');
-    check(inter.modalClosed === true, '技能：点遮罩能单独关掉浮层');
+    check(inter.inlineOpen === true, '技能：点小卡**就地展开**该项完整卡（不弹浮层）');
+    check(inter.noModalHost === true, '技能：确认没有任何浮层宿主节点（用户要求「不要浮窗」）');
+    check(inter.inlineHasAddBtn === true, '技能：展开的卡上有「＋ 加经验」入口');
+    check(inter.inlineHasNoteBtn === true, '技能：展开的卡上有注释入口');
+    check(inter.tilesAfterOpen === 12 && inter.fullAfterOpen === 1,
+      '技能：同一组里恰好一张卡变成完整卡、其余仍是小卡',
+      `小卡 ${inter.tilesAfterOpen} / 完整 ${inter.fullAfterOpen}`);
+    check(inter.expandedSpansRow === true,
+      '技能：完整卡占满整行（宽度≈网格宽 —— 「挤出空间」的前提）',
+      `卡 ${inter.cardWidth}px / 网格 ${inter.gridWidth}px`);
+    check(inter.widerThanTile !== false,
+      '技能：完整卡明显宽于同组小卡（排除「网格只有一列」的躺赢）',
+      `卡 ${inter.cardWidth}px vs 小卡 ${inter.tileWidth}px`);
+    check(inter.pushedDown !== false,
+      '技能：完整卡把同组后面的小卡挤到了下一行',
+      `pushedDown=${inter.pushedDown}`);
+    check(inter.stillOpenAfterRepaint === true,
+      '技能：局部重画后展开态不丢（点注释后完整卡还在，否则注释根本编不了）');
+    check(inter.hasCloseBtn === true, '技能：展开的卡上有 × 收起按钮');
+    check(inter.escClosed === true, '技能：按 Esc 收起展开的卡');
+    check(inter.reopened === true, '技能：再点小卡能重新展开');
+    check(inter.inlineClosed === true, '技能：点 × 收起后回到 13 个小卡、0 张完整卡');
     check(inter.skillTxBox === true, '编辑：点开技能注释后出现编辑区');
     check(inter.skillNoteAfter === '测试说明', '编辑：技能说明写入 state', String(inter.skillNoteAfter));
     check(inter.skillNoteDom === '测试说明', '编辑：技能说明即时渲染到卡片', String(inter.skillNoteDom));
     check(inter.noteInputStillConnected === true,
-      '编辑：浮层里的输入框未被重渲染替换（编辑说明时不丢焦点与已输入内容）');
+      '编辑：展开卡里的输入框未被重渲染替换（编辑说明时不丢焦点与已输入内容）');
     check(inter.skillNoteRestored === '', '编辑：清空后说明被移除', String(inter.skillNoteRestored));
     /* 一键收放（展开 / 收拢集成在一个按钮里） */
     check(inter.fullAfterExpand === 13 && inter.tilesAfterExpand === 0,
@@ -867,6 +965,9 @@ function check(ok, label, detail) {
     check(inter.tilesAfterCollapse === 13 && inter.fullAfterCollapse === 0,
       '技能：再点「收拢全部」→ 回到 13 个小卡',
       `小卡 ${inter.tilesAfterCollapse} / 完整 ${inter.fullAfterCollapse}`);
+    check(inter.fullAllNoCloseBtn === true,
+      '技能：「全部展开」时不逐卡挂 × （收起由顶部那一个按钮统一负责）',
+      `fullAllNoCloseBtn=${inter.fullAllNoCloseBtn}`);
   } else {
     check(false, '交互：测试脚本执行失败', inter && inter.__err ? String(inter.__err).slice(0, 120) : '未知');
   }

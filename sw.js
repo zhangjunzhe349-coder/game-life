@@ -44,15 +44,22 @@
       portrait.js 与旧 avatar.js，不抬版本就永远换不过来。
    v16 的改动（顶栏读数 / 设置页 / 技能列表，均为 v1.8.2）：
    ① 顶栏读数换成 剩余生命 · 年龄（精确到天）· 电量电池；设置页撤掉三张卡；
-      技能默认改为紧凑网格、点开弹浮层详情。
+      技能默认改为紧凑网格。
    ② ASSETS 清单本身没变，但 css/style.css 与 js/app.js / js/skills.js / js/storage.js
       内容全变了 —— 不抬版本号，用户浏览器里的旧缓存会继续供应旧界面。
    v17 的改动（仍是 v1.8.2，未发布前的小修）：
-   ① js/storage.js 把技能「心肺」的 emoji 从 🫁（U+1FAC1，Emoji 13.0 / 2020）
-      换成 💓（U+1F493，Emoji 1.0）—— 前者在本机与老设备上缺字形，界面显示成豆腐块空框。
+   ① js/storage.js 把技能「心肺」的 emoji 从 U+1FAC1（Emoji 13.0 / 2020）换成
+      U+1F493（Emoji 1.0）—— 前者在本机与老设备上缺字形，界面显示成豆腐块空框。
    ② verify-wiring 新增断言把这个坑封死（禁止 U+1FA70–U+1FAFF 区段字符）。
+   v18 的改动（仍是 v1.8.2，未发布前的小修）：
+   ① 技能详情从**浮层**改成**就地展开** —— 用户原话「技能打开不要浮窗，直接展开，挤出空间」。
+      完整卡改为在 #panel-skills 内部渲染，用 .skill-grid > .skill-full { grid-column: 1/-1 }
+      占满整行、把同组后面的小卡挤到下一行；删掉 #skill-modal / .smodal / body.modal-open
+      与 app.js 里切页签时的收尾调用。
+   ② css/style.css 与 js/skills.js / js/app.js 又变了一遍 —— 同一版本内未发布也要抬版本号，
+      否则本地或任何已打开过 v17 的浏览器会继续用旧缓存里的浮层版。
    ============================================================ */
-const CACHE = 'gamelife-v17';
+const CACHE = 'gamelife-v18';
 
 const ASSETS = [
   './',

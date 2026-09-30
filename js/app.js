@@ -62,9 +62,8 @@
       document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === btn));
       const id = btn.dataset.tab;
       document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'panel-' + id));
-      /* 技能详情浮层挂在 <body> 上（不受 panel 的重渲染影响），
-         所以切页签时必须显式关掉，否则它会浮在新页面上方。 */
-      if (GL.closeSkillModal) GL.closeSkillModal();
+      /* v1.8.2 起技能详情是**就地展开**（完整卡在 panel-skills 内部），
+         切页签时不需要任何收尾 —— 展开态跟着面板一起隐藏、切回来还在。 */
       if (id === 'life') GL.renderLife();
       reveal(document.getElementById('panel-' + id));
       window.scrollTo({ top: 0 });

@@ -879,42 +879,25 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 .xp-add input[type="number"] { width: 78px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .xp-add input[type="text"] { flex: 1 1 120px; min-width: 0; }
 
-/* ============ 技能详情浮层（v1.8.2） ============
-   点紧凑小卡 → 弹出该项的完整信息（进度 / 累计 XP / 加经验 / 注释 / 成长记录）。
-   浮层挂在 <body> 上（不是 panel-skills 里）——GL.changed() 会整个替换面板的
-   innerHTML，浮层若在里面，任何一次状态变更都会把它连滚动位置一起抹掉。 */
-.smodal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: var(--s4); }
-.smodal[hidden] { display: none !important; }
-.smodal-mask { position: absolute; inset: 0; background: rgba(4, 5, 8, 0.72); backdrop-filter: blur(6px); }
-.smodal-box {
-  position: relative; width: min(560px, 100%);
-  max-height: min(86vh, 780px); overflow-y: auto; overscroll-behavior: contain;
-  padding: var(--s5);
-  border: 1px solid var(--line-strong); border-radius: var(--r-lg);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
-  box-shadow: var(--sh-3);
+/* ============ 技能就地展开（v1.8.2） ============
+   点紧凑小卡 → 那一格换成完整卡（进度 / 累计 XP / 加经验 / 注释 / 成长记录），
+   用 grid-column: 1 / -1 **占满整行**，同组后面的小卡被整体挤到下一行
+   —— 用户原话「技能打开不要浮窗，直接展开，挤出空间」。
+   不用浮层的好处：上下文不跳走，也省掉「浮层挂 <body>、切页签要手动关」那一整套旁路逻辑。 */
+.skill-grid > .skill-full {
+  grid-column: 1 / -1;
   animation: dropIn var(--dur-base) var(--ease-out);
 }
-.smodal-x {
-  position: absolute; top: 10px; right: 12px; z-index: 1;
-  width: 34px; height: 34px; border-radius: var(--r-xs);
+/* 展开的那张给更亮的描边，一眼看出是它；hover 不再位移（那么大一张卡抖动很别扭） */
+.skill-full { border-color: var(--accent-line); }
+.skill-full:hover { transform: none; border-color: var(--accent-line); }
+.skill-x {
+  flex: none; width: 30px; height: 30px; border-radius: var(--r-xs);
   border: 1px solid var(--line); background: var(--surface-3); color: var(--muted);
-  font-size: 18px; line-height: 1; cursor: pointer;
+  font-size: 16px; line-height: 1; cursor: pointer;
   transition: color var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
 }
-.smodal-x:hover { color: var(--accent); border-color: var(--accent-line); }
-.smodal-head { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; padding-right: 40px; }
-.smodal-title { font-family: var(--font-display); font-weight: 700; font-size: var(--fs-lg); letter-spacing: 0.04em; }
-.smodal-sub {
-  font-family: var(--font-mono); font-size: var(--fs-2xs);
-  letter-spacing: 0.14em; color: var(--faint); text-transform: uppercase;
-}
-.smodal-head + .skill { margin-top: var(--s4); }
-/* 浮层里那张「完整卡片」不再自带卡片外框 —— 它已经在浮层里了，
-   再套一层边框会显得像盒子里套盒子 */
-.smodal .skill { padding: 0; border: 0; background: none; box-shadow: none; }
-.smodal .skill:hover { transform: none; }
-body.modal-open { overflow: hidden; }
+.skill-x:hover { color: var(--accent); border-color: var(--accent-line); }
 
 /* ============ 生命刻度 ============ */
 .life-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s3); }
@@ -1083,12 +1066,10 @@ body.modal-open { overflow: hidden; }
      会把「剩余生命 · 约 49 年」的「年」字挤到下一行 */
   .life-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
   .life-stat span { font-size: var(--fs-2xs); letter-spacing: 0; }
-  /* 技能：完整卡片单列；紧凑网格锁两列（三列每格只剩 ~110px，名字会被挤断） */
+  /* 技能：完整卡片单列；紧凑网格锁两列（三列每格只剩 ~110px，名字会被挤断）。
+     就地展开的整行卡在两种网格里都靠 grid-column: 1 / -1 自动占满，无需额外覆盖。 */
   .skill-grid { grid-template-columns: 1fr; }
   .skill-grid.mini { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
-  /* 浮层在窄屏贴底弹（拇指够得着），并且不再贴边留大留白 */
-  .smodal { padding: var(--s2); align-items: end; }
-  .smodal-box { padding: var(--s4); max-height: 88vh; }
   .save-path { padding: var(--s3); }
   .sp-row > span:first-child { width: 54px; }
   /* 文字编辑区在窄屏改单列：两列时输入框被挤到没法用 */

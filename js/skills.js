@@ -1,34 +1,38 @@
-/* ============ Game Life · 技能经验值（v1.8.2 紧凑版） ============
+/* ============ Game Life · 技能经验值（v1.8.2 紧凑版 + 就地展开） ============
    默认形态：**紧凑小卡**（图标 + 名称 + 等级 + 经验条），整块面积约原来大卡的 1/4。
-   点任意一项 → 浮层弹出该技能的完整信息（本级进度 / 累计 XP / 加经验 / 注释 / 成长记录），
-   每项可单独打开与关闭。
-   顶部一个按钮在「紧凑网格」与「完整卡片」之间**一键收放**（快速展开 / 收拢全部）。
+   点任意一项 → **就地展开**该项的完整信息（本级进度 / 累计 XP / 加经验 / 注释 / 成长记录），
+   完整卡占满整行、把后面的小卡挤下去，再点一次（或点卡上 ×）收起；每项单独开关。
+   顶部一个按钮在「全部展开」与「收拢为紧凑网格」之间一键收放。
 
-   为什么不再默认渲染完整卡片：用户原话「现在每个都太占地方了」——
+   为什么默认不铺开完整卡片：用户原话「现在每个都太占地方了」——
    13 项一次铺开要滚好几屏，而绝大多数时候用户只想扫一眼等级与进度。
+   为什么用就地展开而不是浮层：用户原话「技能打开不要浮窗，直接展开，挤出空间」——
+   展开在同一处、上下文不跳走，也省掉「浮层挂在 body 上」那一整套旁路逻辑。
    ============================================================ */
 (function () {
   'use strict';
 
   let addingFor = null;      // 当前展开加经验行的技能 id
   let noteFor = null;        // 当前展开注释编辑区的技能 id
-  let openFor = null;        // 浮层里正在看详情的技能 id（null = 浮层关闭）
   let lastXp = 10;           // 记住上次填写的 XP，减少重复输入
 
-  /* 密度偏好存独立 localStorage key，**不进 GL.state** ——
-     它是纯 UI 偏好，混进数据结构就得为它动一次迁移，不值。 */
+  /* 展开态分两层：
+     ① openIds —— 本会话里**单独点开**的那些（不持久化，关掉页面就回到紧凑态）；
+     ② expandAll —— 用户上次离开时是不是「全部展开」，存独立 localStorage 键。
+     两者都不进 GL.state：这是纯界面偏好，混进数据结构就得为它动一次迁移，不值。 */
+  const openIds = new Set();
   const EXPAND_KEY = 'gamelife_ui_skills_expand';
   let expandAll = false;
   try { expandAll = localStorage.getItem(EXPAND_KEY) === '1'; } catch (e) { /* 隐私模式 */ }
 
   function list() { return GL.state.skills; }
   function find(id) { return list().find((s) => s.id === id); }
+  function isOpen(id) { return expandAll || openIds.has(id); }
 
-  /* 就地刷新要打中「用户正在看的那一份」：紧凑模式下完整信息只存在于浮层里，
-     展开模式下才是内联卡片 —— 找错了就会出现「改了没反应」。 */
+  /* 就地刷新要打中「当前真的渲染出来那一份」。
+     紧凑模式下未展开的项根本没有完整卡，返回 null 即跳过刷新。 */
   function cardElOf(id) {
-    return document.querySelector('#skill-modal .skill[data-sid="' + id + '"]')
-      || document.querySelector('.skill-full[data-sid="' + id + '"]');
+    return document.querySelector('#panel-skills .skill-full[data-sid="' + id + '"]');
   }
 
   /* 就地刷新卡片上的名称与小字 —— 不走 GL.changed()，
@@ -83,7 +87,7 @@
   function tile(s) {
     const lv = GL.skillLevel(s);
     return `<button type="button" class="sk-tile" data-sid="${s.id}" data-skill-open="${s.id}"
-        aria-haspopup="dialog" aria-label="查看 ${GL.esc(s.name)} 详情 · Lv.${lv.level}">
+        aria-expanded="false" aria-label="展开 ${GL.esc(s.name)} 详情 · Lv.${lv.level}">
       <span class="sk-row">
         <span class="skill-emoji" aria-hidden="true">${s.emoji || '🎯'}</span>
         <span class="skill-name">${GL.esc(s.name)}</span>
@@ -93,10 +97,10 @@
     </button>`;
   }
 
-  /* ---------- 完整详情（浮层内 / 展开模式内联，同一份 markup） ----------
-     v1.8.2 起原名 card()，类名加 skill-full 以便与紧凑小卡区分开
-     （校准脚本按类名分别数它们）。 */
-  function detail(s) {
+  /* ---------- 完整详情（就地展开的那一张） ----------
+     closable：是否在卡上给一个「收起」按钮。单独展开时给（用户需要明确的关闭入口），
+     「全部展开」模式下不给 —— 那时收起由顶部那个按钮统一负责，13 张卡各挂一个 × 只会更乱。 */
+  function detail(s, closable) {
     const lv = GL.skillLevel(s);
     const open = addingFor === s.id;
     const noteOpen = noteFor === s.id;
@@ -106,6 +110,8 @@
         <span class="skill-emoji">${s.emoji || '🎯'}</span>
         <span class="skill-name">${GL.esc(s.name)}</span>
         <span class="skill-lv">Lv.${lv.level}</span>
+        ${closable ? `<button type="button" class="skill-x" data-skill-close="${s.id}"
+          aria-label="收起 ${GL.esc(s.name)}" title="收起">×</button>` : ''}
       </div>
       ${s.sub ? `<div class="skill-sub">${GL.esc(s.sub)}</div>` : ''}
       <div class="xp-bar"><i style="width:${lv.pct}%"></i></div>
@@ -135,63 +141,6 @@
     </div>`;
   }
 
-  /* ---------- 详情浮层 ----------
-     挂在 <body> 上而不是 panel-skills 里：GL.changed() 会整个替换 panel 的 innerHTML，
-     浮层若在里面，任何一次状态变更都会把它连同滚动位置一起抹掉。 */
-  function modalHost() {
-    let m = document.getElementById('skill-modal');
-    if (m) return m;
-    m = document.createElement('div');
-    m.id = 'skill-modal';
-    m.className = 'smodal';
-    m.hidden = true;
-    m.innerHTML = `<div class="smodal-mask" data-smodal-close></div>
-      <div class="smodal-box" role="dialog" aria-modal="true" aria-labelledby="smodal-title">
-        <button class="smodal-x" type="button" data-smodal-close aria-label="关闭">×</button>
-        <div class="smodal-body"></div>
-      </div>`;
-    document.body.appendChild(m);
-    /* 事件委托挂浮层自己身上：浮层里的事件不会冒泡到 panel-skills，反之亦然，
-       所以同一个处理器绑两处不会重复触发。 */
-    m.addEventListener('click', onClick);
-    m.addEventListener('change', onChange);
-    m.addEventListener('keydown', onKey);
-    return m;
-  }
-
-  function renderModal() {
-    const s = openFor ? find(openFor) : null;
-    if (!s) openFor = null;
-    const m = s ? modalHost() : document.getElementById('skill-modal');
-    if (!m) return;
-    if (!s) {
-      m.hidden = true;
-      document.body.classList.remove('modal-open');
-      /* 关闭时必须把内容也清掉：只 hidden 的话，那张 .skill-full 还留在 DOM 里，
-         任何按选择器数「当前有几张完整卡片」的地方都会多算一张（校验就踩了这个）。 */
-      const stale = m.querySelector('.smodal-body');
-      if (stale) stale.innerHTML = '';
-      return;
-    }
-    const lv = GL.skillLevel(s);
-    m.querySelector('.smodal-body').innerHTML =
-      `<div class="smodal-head">
-        <span class="smodal-title" id="smodal-title">${s.emoji || '🎯'} ${GL.esc(s.name)}</span>
-        <span class="smodal-sub">Lv.${lv.level} · 累计 ${s.xp} XP</span>
-      </div>${detail(s)}`;
-    m.hidden = false;
-    document.body.classList.add('modal-open');
-  }
-
-  /* 供 app.js 切页签时调用：浮层在 body 上，不关掉会浮在新页面上方 */
-  GL.closeSkillModal = function () {
-    if (!openFor) return;
-    openFor = null;
-    addingFor = null;
-    noteFor = null;
-    repaint();
-  };
-
   function manage() {
     return `<details class="hist" style="margin-top:4px">
       <summary>管理技能 · 所属分组 / 升级曲线 / 删除</summary>
@@ -215,9 +164,9 @@
     </details>`;
   }
 
-  /* 面板与浮层的局部重画：不触发整页 GL.changed()，
-     否则浮层里正在编辑的输入框会被换掉（与属性面板的就地编辑同一条原则）。 */
-  function repaint() { render(); renderModal(); }
+  /* 面板局部重画：不触发整页 GL.changed()，
+     否则正在编辑的输入框会被换掉（与属性面板的就地编辑同一条原则）。 */
+  function repaint() { render(); }
 
   function render() {
     const el = document.getElementById('panel-skills');
@@ -237,7 +186,7 @@
           </button>
           <span class="dim">${expandAll
             ? '完整卡片：进度 / 加经验 / 注释 / 成长记录都在卡上'
-            : '点任意一项看详情、加经验或编辑注释'}</span>
+            : '点任意一项就地展开详情，再点一次收起'}</span>
         </div>
         ${groups.map((g) => {
           if (!g.items.length) return '';
@@ -248,7 +197,11 @@
               <span class="sg-name">${GL.esc(g.name)}</span>
               <span class="sg-meta">${g.items.length} 项 · ${gxp} XP</span>
             </div>
-            <div class="skill-grid${expandAll ? '' : ' mini'}">${g.items.map(expandAll ? detail : tile).join('')}</div>
+            <div class="skill-grid${expandAll ? '' : ' mini'}">${g.items.map((s) => {
+              /* 展开的那一项换成完整卡，靠 CSS 的 grid-column: 1 / -1 占满整行，
+                 于是同组后面的小卡被整体挤到下一行 —— 这就是「挤出空间」。 */
+              return isOpen(s.id) ? detail(s, !expandAll) : tile(s);
+            }).join('')}</div>
           </section>`;
         }).join('') || '<span class="dim">还没有技能，请点下方按钮创建</span>'}
         <div class="edit-box">
@@ -278,20 +231,24 @@
     else GL.toast(`+${xp} XP · ${s.emoji || ''}${s.name}${note ? ' · ' + note : ''}`, 'ok');
   }
 
-  /* 面板与浮层共用同一套处理器（委托挂在各自的容器上，互不干扰）。
-     host = e.currentTarget，用于渲染后在新 DOM 里定位输入框。 */
+  /* 面板内所有事件走这里（就地展开后不再有第二个宿主）。 */
   function onClick(e) {
-    const host = e.currentTarget;
     const panel = document.getElementById('panel-skills');
 
-    /* 关闭浮层（点遮罩 / 点 ×） */
-    if (e.target.closest('[data-smodal-close]')) { GL.closeSkillModal(); return; }
-
-    /* 点紧凑小卡 → 打开该技能的详情浮层 */
+    /* 点紧凑小卡 → 就地展开该项 / 再点收起 */
     const opener = e.target.closest('[data-skill-open]');
     if (opener) {
       const id = opener.dataset.skillOpen;
-      openFor = openFor === id ? null : id;   // 同一张再点一次 = 关掉
+      if (openIds.has(id)) openIds.delete(id); else openIds.add(id);
+      addingFor = null; noteFor = null;
+      repaint();
+      return;
+    }
+
+    /* 完整卡上的 × → 单独收起该项 */
+    const closer = e.target.closest('[data-skill-close]');
+    if (closer) {
+      openIds.delete(closer.dataset.skillClose);
       addingFor = null; noteFor = null;
       repaint();
       return;
@@ -300,8 +257,9 @@
     /* 展开 / 收拢全部 —— 一个按钮来回切 */
     if (e.target.id === 'sk-expand') {
       expandAll = !expandAll;
+      openIds.clear();
       try { localStorage.setItem(EXPAND_KEY, expandAll ? '1' : '0'); } catch (err) { /* ignore */ }
-      addingFor = null; noteFor = null; openFor = null;
+      addingFor = null; noteFor = null;
       repaint();
       GL.toast(expandAll ? '已展开全部技能' : '已收拢为紧凑网格');
       return;
@@ -310,19 +268,21 @@
     // 展开 / 收起注释编辑区
     const nt = e.target.closest('[data-note-toggle]');
     if (nt) {
-      noteFor = noteFor === nt.dataset.noteToggle ? null : nt.dataset.noteToggle;
+      const id = nt.dataset.noteToggle;
+      noteFor = noteFor === id ? null : id;
       addingFor = null;
       repaint();
-      const inp = host.querySelector('.tx-edit [data-skill-name]');
+      const inp = document.querySelector('#panel-skills .skill-full[data-sid="' + id + '"] .tx-edit [data-skill-name]');
       if (inp) { inp.focus(); inp.select(); }
       return;
     }
     // 展开 / 收起加经验行
     const add = e.target.closest('[data-add]');
     if (add) {
-      addingFor = addingFor === add.dataset.add ? null : add.dataset.add;
+      const id = add.dataset.add;
+      addingFor = addingFor === id ? null : id;
       repaint();
-      const inp = host.querySelector('#xp-' + add.dataset.add);
+      const inp = document.getElementById('xp-' + id);
       if (inp) { inp.focus(); inp.select(); }
       return;
     }
@@ -355,8 +315,9 @@
     if (del) {
       const s = find(del.dataset.skillDel);
       if (!confirm('确定删除技能「' + (s ? s.name : '') + '」及其全部成长记录吗？')) return;
-      GL.state.skills = list().filter((x) => x.id !== del.dataset.skillDel);
-      openFor = null;
+      const id = del.dataset.skillDel;
+      GL.state.skills = list().filter((x) => x.id !== id);
+      openIds.delete(id);
       GL.changed();
     }
   }
@@ -392,7 +353,11 @@
   }
 
   function onKey(e) {
-    if (e.key === 'Escape' && openFor) { GL.closeSkillModal(); return; }
+    if (e.key === 'Escape' && (openIds.size || noteFor || addingFor)) {
+      openIds.clear(); noteFor = null; addingFor = null;
+      repaint();
+      return;
+    }
     if (e.key !== 'Enter') return;
     const panel = document.getElementById('panel-skills');
     if (e.target.id === 's-name' && panel) { panel.querySelector('#s-add').click(); return; }
@@ -418,8 +383,9 @@
   }
 
   /* hooks 里必须带 bind()：GL.changed() 是唯一重渲染入口，只注册 render 会导致
-     事件委托从未绑定 —— 表现为「页面能看、点不动」。bind() 有幂等保护。 */
-  const renderAll = function () { render(); renderModal(); bind(); };
+     事件委托从未绑定 —— 表现为「页面能看、点不动」。bind() 有幂等保护
+     （#panel-skills 是 index.html 里的静态宿主，innerHTML 换掉不影响它身上的监听）。 */
+  const renderAll = function () { render(); bind(); };
   GL.hooks.push(renderAll);
   GL.renderSkills = renderAll;
 })();

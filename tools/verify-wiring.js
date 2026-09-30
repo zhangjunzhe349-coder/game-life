@@ -133,6 +133,34 @@ if (/GL\.applyDocPreset\s*=/.test(storageSrc)) {
   ok.push('设置页已撤掉的三张卡（技能篇预设 / 版本与回滚 / 安装到桌面）确认未复活');
 }
 
+/* ---------- 3c. 技能详情不许退回浮层（v1.8.2） ----------
+   浮层方案（#skill-modal / .smodal）做过一版，用户看过之后原话：
+   「技能打开不要浮窗，用当时的另一种方案，直接展开，挤出空间」。
+   于是完整卡改为在 panel-skills 内部就地渲染（.skill-grid > .skill-full 占满整行）。
+   留这条反向断言的理由与 3b 相同：**最容易犯的回归不是删漏了，而是改别处时顺手加回来**。
+   判据只认「宿主节点 + 浮层类名 + 挂在 body 上的模态类」，不认「浮窗」这两个字
+   —— 中文词在说明注释里必然出现，拿它当判据会把注释一起判成违规。 */
+const cssSrc = fs.readFileSync(path.join(ROOT, 'css', 'style.css'), 'utf8');
+const skillsSrc = fs.readFileSync(path.join(ROOT, 'js', 'skills.js'), 'utf8');
+const modalMarks = [];
+if (html.indexOf('id="skill-modal"') !== -1) modalMarks.push('index.html 里的 #skill-modal');
+if (/id\s*=\s*'skill-modal'/.test(skillsSrc)) modalMarks.push('skills.js 里动态创建的 #skill-modal');
+if (/^\s*\.smodal[\s,{.:]/m.test(cssSrc)) modalMarks.push('style.css 里的 .smodal 规则');
+if (/body\.modal-open/.test(cssSrc)) modalMarks.push('style.css 里的 body.modal-open');
+if (modalMarks.length) {
+  problems.push('技能详情又回到浮层方案了：' + modalMarks.join('、') + ' —— ' +
+    '用户明确要求「不要浮窗，直接展开，挤出空间」，就地展开的完整卡在 #panel-skills 内部');
+} else {
+  ok.push('技能详情确认是就地展开（无 #skill-modal / .smodal / body.modal-open 残留）');
+}
+/* 就地展开必须真的占满整行，否则「挤出空间」不成立 */
+if (/\.skill-grid\s*>\s*\.skill-full\s*\{[^}]*grid-column\s*:\s*1\s*\/\s*-1/.test(cssSrc)) {
+  ok.push('就地展开的完整卡声明了 grid-column: 1 / -1（占满整行、把后面的小卡挤下去）');
+} else {
+  problems.push('style.css 缺少「.skill-grid > .skill-full { grid-column: 1 / -1 }」—— ' +
+    '没了它，展开的完整卡只会占一个格子，挤不动后面的小卡');
+}
+
 /* ---------- 4. 被移除节点不得再被 JS 引用 ---------- */
 const jsFiles = fs.readdirSync(path.join(ROOT, 'js')).filter((f) => f.endsWith('.js'));
 /* avatar-canvas 是 3D 时代的宿主；portrait-svg / stage-base / avatar-ctrl 随中央立绘一并删除。
@@ -236,7 +264,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 17;   // v1.8.2：顶栏读数重做 + 设置页瘦身 + 技能改紧凑网格/浮层（js 与 css 都有改动）；v17 又改了 storage.js 的 emoji，资源有变必须 ≥ v17
+const MIN_SW_VER = 18;   // v1.8.2：顶栏读数 / 设置页 / 技能形态（v16）→ emoji 豆腐块修正（v17）→ 技能详情改就地展开、删浮层（v18）；每轮都动了 css 或 js，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 
