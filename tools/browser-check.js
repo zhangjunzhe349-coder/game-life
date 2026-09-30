@@ -290,6 +290,48 @@ function check(ok, label, detail) {
         return i ? i.naturalWidth : -1;
       })(),
       firstGroupMean: document.querySelector('.ag-mean') ? document.querySelector('.ag-mean').textContent : null,
+      /* v1.8.2：emoji 豆腐块探测（地面真值）。
+         起因：技能「心肺」用的 🫁（U+1FAC1，Emoji 13.0）在本机与老设备上缺字形，
+         界面上就是一个空方框；截图能看出来，但静态检查看不出来。
+         做法：把每个可见 emoji 画进 canvas（字体用元素的实际 computed font-family），
+         与「必然缺失」的参考字符 U+10FFFF 的位图逐字节比对 —— 位图相同即同一个字形，
+         也就说明这个字符是豆腐块。比量宽度可靠（宽度可能撞巧，位图不会）。
+         ⚠ 模板字符串里反斜杠转义会掉一层，所以这里刻意不用正则、改用码点数值比较。 */
+      emojiTofu: (() => {
+        try {
+          const nodes = document.querySelectorAll('.skill-emoji, .ag-glyph, .sg-glyph, .card-title, .tab, nav a');
+          const probe = document.querySelector('.skill-emoji') || document;
+          const fam = getComputedStyle(probe).fontFamily || 'sans-serif';
+          const cv = document.createElement('canvas');
+          cv.width = 72; cv.height = 72;
+          const ctx = cv.getContext('2d');
+          const font = '48px ' + fam;
+          const draw = (ch) => {
+            ctx.clearRect(0, 0, 72, 72);
+            ctx.font = font; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff';
+            ctx.fillText(ch, 6, 6);
+            return cv.toDataURL();
+          };
+          const refCh = String.fromCodePoint(0x10FFFF);
+          const ref = draw(refCh);
+          const set = new Set();
+          nodes.forEach((el) => {
+            const t = el.textContent || '';
+            for (const ch of t) {
+              const cp = ch.codePointAt(0);
+              if (cp > 0x2000 && cp !== 0xFE0F && cp !== 0x200D && !String(ch).trim()) continue;
+              if (cp > 0x2000 && cp < 0x10000 || cp >= 0x1F000) set.add(ch);
+            }
+          });
+          const bad = [];
+          set.forEach((ch) => {
+            if (draw(ch) === ref) {
+              bad.push(ch + ' U+' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
+            }
+          });
+          return bad;
+        } catch (e) { return ['（探测异常：' + e.message + '）']; }
+      })(),
     };
   })()`.replace('__ERRS__', JSON.stringify(pageErrors)));
 
@@ -459,6 +501,9 @@ function check(ok, label, detail) {
   check(S.skillTiles === 13, '技能默认渲染成 13 个紧凑小卡（图标 + 名称 + 等级 + 经验条）', `实际 ${S.skillTiles}`);
   check(S.skillFull === 0, '紧凑模式下没有铺开的完整卡片（面积就是这么省下来的）', `实际 ${S.skillFull}`);
   check(S.skillExpandBtn === true, '技能页有「展开全部 / 收拢全部」按钮');
+  check(Array.isArray(S.emojiTofu) && S.emojiTofu.length === 0,
+    'emoji：界面上没有渲染成豆腐块空框的字符（位图与「必然缺失」参考字符比对）',
+    `检出 ${JSON.stringify(S.emojiTofu)}`);
 
   /* ---------- 小字照录原文 + 可编辑入口（v1.6.0） ---------- */
   check(S.attrHasSub === 5, '属性小字渲染 5 处（原文里带括号的 5 项）', `实际 ${S.attrHasSub}`);

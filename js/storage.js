@@ -42,7 +42,7 @@
     { id: 'physio', name: '生理', emoji: '💪' },
     { id: 'lang', name: '语言', emoji: '🗣️' },
     { id: 'social', name: '社交', emoji: '💬' },
-    { id: 'look', name: '外貌', emoji: '🪞' },
+    { id: 'look', name: '外貌', emoji: '💄' },
     { id: 'misc', name: '其他', emoji: '🧭' },
   ];
 
@@ -82,7 +82,7 @@
      小字同样逐字照录用户提供的【游戏人生(技能篇)元技能与方法论】原文（不在本仓库内） */
   const SKILL_DEFS = [
     ['muscle', '肌肉量', '（细狗——匀称——薄肌）', '💪', 'physio', [['力量训练', 30], ['自重训练组', 15]], ''],
-    ['cardio', '心肺', '', '🫁', 'physio', [['有氧训练', 25], ['间歇冲刺', 30]], ''],
+    ['cardio', '心肺', '', '💓', 'physio', [['有氧训练', 25], ['间歇冲刺', 30]], ''],
 
     ['writing', '写作能力', '', '✍️', 'lang', [['写作30分钟', 15], ['输出一篇文章', 40]], ''],
     ['speaking', '表达能力', '（口头）', '🎤', 'lang', [['刻意练习15分钟', 10], ['完整表达一次', 30]], ''],
@@ -348,6 +348,21 @@
     GL.state.version = 4;
   }
 
+  /* ---------- 内置技能的 emoji 重同步（v1.8.2） ----------
+     技能对象的 `emoji` 是建对象时从 SKILL_DEFS **拷进数据里**的，之后一直躺在 localStorage。
+     而页面上的就地编辑只开放 名称 / 小字 / 说明 三样，**emoji 不在可编辑范围内**
+     → 定义表里改了 emoji（本次把 🫁 / 🪞 换掉，它们在本机与老设备上缺字形、显示成豆腐块空框）
+     必须能落到已有数据上，否则用户升级后看到的还是那两个方框。
+     只覆盖内置 id 的 emoji，**绝不碰 name / sub / note**（那三样是用户可编辑的，动了就是毁编辑）。
+     不带版本号、不写进迁移链：它幂等、只比对 emoji 一个字段，改坏了也只影响图标。 */
+  function resyncBuiltinEmoji() {
+    const defs = {};
+    SKILL_DEFS.forEach(([id, , , emoji]) => { defs[id] = emoji; });
+    (GL.state.skills || []).forEach((s) => {
+      if (s && defs[s.id] && s.emoji !== defs[s.id]) s.emoji = defs[s.id];
+    });
+  }
+
   GL.load = function () {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(KEY)); } catch (e) { /* ignore */ }
@@ -361,6 +376,7 @@
       if (prevVer < 4) migrateV3toV4();
       if (!GL.state.ui || !Array.isArray(GL.state.ui.attrCollapsed)) GL.state.ui = { attrCollapsed: [] };
     }
+    resyncBuiltinEmoji();
     GL.save();
   };
 
@@ -381,6 +397,7 @@
       throw new Error('文件格式不正确');
     }
     GL.state = merge(defaults(), obj);
+    resyncBuiltinEmoji();
     GL.save();
   };
 

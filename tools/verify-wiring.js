@@ -236,9 +236,35 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 16;   // v1.8.2：顶栏读数重做 + 设置页瘦身 + 技能改紧凑网格/浮层（js 与 css 都有改动），资源有变必须 ≥ v16
+const MIN_SW_VER = 17;   // v1.8.2：顶栏读数重做 + 设置页瘦身 + 技能改紧凑网格/浮层（js 与 css 都有改动）；v17 又改了 storage.js 的 emoji，资源有变必须 ≥ v17
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
+
+/* ---------- 6f-2. emoji 字形安全（v1.8.2） ----------
+   事故：技能「心肺」用了 🫁（U+1FAC1），是 Emoji 13.0（2020）才加入的字符。
+   本机字体没有这个字形 → 界面上就是一个「豆腐块」空方框（headless 渲染出来
+   与真实设备一致，已截图确认）。同批次其余 12 个 emoji 全部正常。
+   U+1FA70–U+1FAFF 这一块整体是 2019 年后的新增（Emoji 12.0 起陆续填充），
+   老一点的 Windows / 安卓设备普遍缺字形 —— 用这条断言把这个坑封死。
+   若将来真要新字符，先确认目标设备有字形，再把这里放宽并写清依据。 */
+const RISKY_EMOJI = /[\u{1FA70}-\u{1FAFF}]/gu;
+function firstRiskyEmoji(src) {
+  const m = src.match(RISKY_EMOJI);
+  if (!m) return null;
+  const i = src.indexOf(m[0]);
+  const ctx = src.slice(Math.max(0, i - 26), i + 8).replace(/\n/g, ' ');
+  return { ch: m[0], cps: [...m[0]].map((c) => 'U+' + c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')).join(' '), ctx };
+}
+const risky = firstRiskyEmoji(storageSrc) || firstRiskyEmoji(html);
+if (risky) {
+  problems.push(
+    `发现高风险 emoji「${risky.ch}」（${risky.cps}）—— 位于 U+1FA70–U+1FAFF（2019 年后新增字形），` +
+    `老设备缺字形会显示成豆腐块空框。位置附近：…${risky.ctx}…。请换成老字符（如 💓 替代 🫁）`
+  );
+} else {
+  ok.push('属性/技能/页面里没有 U+1FA70+ 的高风险 emoji（老设备缺字形会显示成豆腐块）');
+}
+
 
 /* ---------- 6g. SW 必须能把新版本送到用户眼前（v1.7.4 实机事故守门） ----------
    事故：改了代码、也发了新包，用户实机反馈「没有任何变化」。

@@ -283,6 +283,49 @@ const v3State = {
     '衣橱：重复 load 幂等（不会二次迁移、留档不丢）');
 }
 
+/* ---------- 内置技能 emoji 重同步（v1.8.2） ----------
+   场景：用户数据里躺的是旧 emoji（🫁 / 🪞 —— 本机与老设备缺字形，界面显示成豆腐块）。
+   定义表换掉 emoji 后必须能落到老数据上；同时**绝不能碰**用户可编辑的 name / sub / note，
+   也不能动用户自建技能自己的 emoji。 */
+{
+  const { GL, store } = boot();
+  GL.load();                                     // 先让 defaults() 落进 store，才有可改的底稿
+  const seeded = JSON.parse(JSON.stringify(GL.state));
+  seeded.skills.forEach((s) => {
+    if (s.id === 'cardio') { s.emoji = '🫁'; s.name = '心肺（我改过名）'; s.sub = '我改过小字'; }
+    if (s.id === 'writing') s.emoji = '✍️';      // 本来就对，不应被误改
+    if (s.id === 'muscle') s.emoji = '💪';       // 本来就对
+  });
+  // 用户自建技能：id 不在定义表里，emoji 必须原样保留
+  seeded.skills.push({ id: 'u_custom_1', name: '自建技能', sub: '', note: '',
+    emoji: '🪞', group: 'misc', xp: 0, xpPerLevel: 100, actions: [], logs: [] });
+  store['gamelife_state_v1'] = JSON.stringify(seeded);
+
+  GL.load();
+  const A = GL.state;
+  const cardio = A.skills.find((s) => s.id === 'cardio');
+  const custom = A.skills.find((s) => s.id === 'u_custom_1');
+
+  check(cardio.emoji === '💓', 'emoji：内置技能的旧 emoji 被定义表修正（🫁 → 💓）',
+    '实际 ' + cardio.emoji);
+  check(cardio.name === '心肺（我改过名）' && cardio.sub === '我改过小字',
+    'emoji：重同步不碰用户可编辑的名称 / 小字',
+    'name=' + cardio.name + ' sub=' + cardio.sub);
+  check(custom && custom.emoji === '🪞',
+    'emoji：用户自建技能的 emoji 原样保留（只认内置 id）',
+    '实际 ' + (custom ? custom.emoji : '（自建项丢失）'));
+  const builtinRisky = A.skills.filter((s) => !String(s.id).startsWith('u_'))
+    .filter((s) => /[\u{1FA70}-\u{1FAFF}]/u.test(s.emoji || ''));
+  check(builtinRisky.length === 0,
+    'emoji：内置技能里不再有 U+1FA70+ 的豆腐块字符',
+    '残留 ' + builtinRisky.map((s) => s.name).join('、'));
+
+  // 幂等：再 load 一次结果不变
+  GL.load();
+  check(GL.state.skills.find((s) => s.id === 'cardio').emoji === '💓',
+    'emoji：重复 load 幂等（不会反复改写）');
+}
+
 /* ============ 输出 ============ */
 console.log('=== 数据迁移校验 ===\n');
 ok.forEach((s) => console.log('  ✓ ' + s));
