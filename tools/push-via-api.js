@@ -30,6 +30,12 @@
  * 5. **author 与 committer 的时间是两个字段，不能共用**（`%aI` / `%cI`）。
  *    `git commit --amend` / rebase / cherry-pick 都会刷新 committer 时间而与 author 不同，
  *    拿 author 时间填 committer，SHA 必然对不上。
+ * 6. **删文件**（diff 状态 `D`）不能用 `newMode` 构造 tree —— 它在 raw diff 里恒为
+ *    全零占位 `000000`，API 会拒：422 "Must supply a valid tree.mode"。
+ *    正确写法是 `{ path, mode: oldMode, type: 'blob', sha: null }`（oldMode 是删除前
+ *    的合法模式，如 100644）。**症状与前五条不同**：不是「tree 不一致」，而是推送直接报错。
+ *    2026-10-12 首次真实踩到 —— 前面几版全是纯新增/修改，从没走过这条路径（那一版
+ *    删了 js/portrait.js 等 4 个文件）。
  *
  * ⚠ 附带一条操作纪律：**已经推上去的提交不要再 amend**（改消息也不行 —— 新 SHA 与远程
  * 不再有快进关系，本工具会拒绝推送）。要改说明就新开一个提交，或把内容写进代码注释。
@@ -122,7 +128,9 @@ function parseRawDiff(from, to) {
       const newPath = parts[i++];
       items.push({ kind: status, oldPath, newPath, oldMode, newMode, newSha });
     } else {
-      items.push({ kind: status, path: parts[i++], newMode, newSha });
+      /* 删除项的 newMode 恒为 000000（diff 里「没有新状态」就是这个表示），
+         构造 tree 时要拿 oldMode 当那个合法 mode，见下面 D 分支。 */
+      items.push({ kind: status, path: parts[i++], oldMode, newMode, newSha });
     }
   }
   return items;
@@ -142,7 +150,15 @@ async function replicate(commitSha, parentSha, blobCache) {
       entries.push({ path: it.newPath, mode: it.newMode, type: 'blob', sha: await pushBlobs(blobCache, it.newSha) });
       console.log(`   ~ ${it.oldPath} → ${it.newPath}`);
     } else if (it.kind === 'D') {
-      entries.push({ path: it.path, mode: it.newMode, type: 'blob', sha: null });
+      /* 删文件：Git Data API 要求给一个合法 mode + sha:null。
+         ⚠ 这里必须用 oldMode —— D 项的 newMode 是 diff 的全零占位 `000000`，
+         直接送上去会被拒：422 "Must supply a valid tree.mode"。 */
+      entries.push({
+        path: it.path,
+        mode: (it.oldMode && it.oldMode !== '000000') ? it.oldMode : '100644',
+        type: 'blob',
+        sha: null,
+      });
       console.log(`   - ${it.path}`);
     } else {
       entries.push({ path: it.path, mode: it.newMode, type: 'blob', sha: await pushBlobs(blobCache, it.newSha) });
