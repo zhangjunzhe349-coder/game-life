@@ -264,17 +264,18 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 18;   // v1.8.2：顶栏读数 / 设置页 / 技能形态（v16）→ emoji 豆腐块修正（v17）→ 技能详情改就地展开、删浮层（v18）；每轮都动了 css 或 js，资源有变就必须抬到同值
+const MIN_SW_VER = 19;   // v1.9.0：设置页新增「检查更新」按钮（app.js 加 GL.checkUpdate、css 加 .upd-state）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开；每轮都动了 css 或 js，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 
 /* ---------- 6f-2. emoji 字形安全（v1.8.2） ----------
-   事故：技能「心肺」用了 🫁（U+1FAC1），是 Emoji 13.0（2020）才加入的字符。
+   事故：技能「心肺」用了 U+1FAC1，是 Emoji 13.0（2020）才加入的字符。
    本机字体没有这个字形 → 界面上就是一个「豆腐块」空方框（headless 渲染出来
    与真实设备一致，已截图确认）。同批次其余 12 个 emoji 全部正常。
    U+1FA70–U+1FAFF 这一块整体是 2019 年后的新增（Emoji 12.0 起陆续填充），
    老一点的 Windows / 安卓设备普遍缺字形 —— 用这条断言把这个坑封死。
-   若将来真要新字符，先确认目标设备有字形，再把这里放宽并写清依据。 */
+   ⚠ 连注释与报错文案里也**只写码点、不写那个字符** —— 一个「禁止新 emoji」的
+   守卫自己带着新 emoji，看报错的人终端里照样是一块豆腐，等于把话说糊了。 */
 const RISKY_EMOJI = /[\u{1FA70}-\u{1FAFF}]/gu;
 function firstRiskyEmoji(src) {
   const m = src.match(RISKY_EMOJI);
@@ -287,10 +288,20 @@ const risky = firstRiskyEmoji(storageSrc) || firstRiskyEmoji(html);
 if (risky) {
   problems.push(
     `发现高风险 emoji「${risky.ch}」（${risky.cps}）—— 位于 U+1FA70–U+1FAFF（2019 年后新增字形），` +
-    `老设备缺字形会显示成豆腐块空框。位置附近：…${risky.ctx}…。请换成老字符（如 💓 替代 🫁）`
+    `老设备缺字形会显示成豆腐块空框。位置附近：…${risky.ctx}…。` +
+    '请换成老字符（例如心肺那个换成 U+1F493 的爱心，外貌组的换成 U+1F484 的口红）'
   );
 } else {
   ok.push('属性/技能/页面里没有 U+1FA70+ 的高风险 emoji（老设备缺字形会显示成豆腐块）');
+}
+/* 守卫自己也不许带（见上面的 ⚠）：它是「禁止新 emoji」这条规则本身，
+   自己带着新 emoji，看报错的人在终端里会先看到一块豆腐，等于把话说糊了。
+   ⚠ 别把它写成「全仓扫描」—— 本文件里那条正则的字面量 `\u{1FA70}` 是转义序列、
+   不是真字符，所以扫到自己不会误报。 */
+if (firstRiskyEmoji(fs.readFileSync(__filename, 'utf8'))) {
+  problems.push('verify-wiring.js 自己带了 U+1FA70+ 的 emoji —— 注释与报错文案里只许写码点');
+} else {
+  ok.push('verify-wiring.js 自身也只写码点、不带高风险 emoji');
 }
 
 
@@ -313,11 +324,15 @@ else problems.push('app.js 注册 SW 时没写 updateViaCache: none —— sw.js
 if (/reg\.update\(\)/.test(app)) ok.push('每次打开主动查一次 SW 更新（reg.update）');
 else problems.push('app.js 没在打开时 reg.update()，只能等浏览器自己想起来查更新');
 
-/* ③ 页面侧自刷是主力：旧 SW 缓存优先，只有页面自己重载才拿得到新资源 */
-if (/addEventListener\('controllerchange'[\s\S]{0,240}?location\.reload\(\)/.test(app)) {
+/* ③ 页面侧自刷是主力：旧 SW 缓存优先，只有页面自己重载才拿得到新资源。
+   v1.9.0 起刷新动作收进 reloadForUpdate()（自动与「检查更新」按钮共用同一条路 +
+   同一个单次守卫），所以这里不只认「controllerchange 后面紧跟 location.reload()」，
+   而是要求「绑到那个函数」且「那个函数真的会 reload」—— 两步都查，才算钉住。 */
+if (/addEventListener\('controllerchange',\s*reloadForUpdate\)/.test(app)
+  && /function\s+reloadForUpdate\s*\([\s\S]*?location\.reload\(\)/.test(app)) {
   ok.push('页面侧监听 controllerchange 自刷（换版后打开一次就看到新界面 —— 主力机制）');
 } else {
-  problems.push('app.js 没有监听 controllerchange 自刷 —— 旧 SW 缓存优先会把旧界面一直供下去，用户「装了新版却什么都没变」');
+  problems.push('app.js 没有把 controllerchange 绑到 reloadForUpdate()（或该函数不再 reload）—— 旧 SW 缓存优先会把旧界面一直供下去，用户「装了新版却什么都没变」');
 }
 
 /* ④ 两个死锁：写成「看起来更规范」的 await 化就会送不出新版 */
@@ -338,6 +353,54 @@ if (/clients\.matchAll/.test(sw) && /\.navigate\(/.test(sw)) {
 } else {
   problems.push('sw.js 连兜底刷新都没了 —— 页面上跑的还是没有 controllerchange 监听的旧代码时（v1.7.4 → v1.7.5 正是这种），新版永远送不出去');
 }
+
+/* ---------- 6h. 「检查更新」按钮必须真的接在换版链路上（v1.9.0） ----------
+   这类按钮最容易退化成安慰剂：画个按钮、点完弹一句「已是最新」，
+   底下什么都没发生 —— 界面看着更"完整"了，实际是把「看不到新版」这件事藏得更深。
+   所以这里把「按钮 → GL.checkUpdate → reg.update() → 自刷」这条链的每一环都钉住，
+   外加 sw.js 那侧必须留好的 SKIP_WAITING 兜底通道。 */
+const hasUpdBtn = /id="btn-check-update"|id\s*=\s*'btn-check-update'/.test(app);
+const hasUpdHandler = /e\.target\.id\s*===\s*'btn-check-update'[\s\S]{0,80}?GL\.checkUpdate\(\)/.test(app);
+const hasUpdEntry = /GL\.checkUpdate\s*=\s*(async\s+)?function/.test(app);
+if (hasUpdBtn && hasUpdHandler && hasUpdEntry) {
+  ok.push('设置页「检查更新」接线完整（关于卡片里有按钮 + 点击有处理 + GL.checkUpdate 有实现）');
+} else {
+  problems.push('「检查更新」接线不完整（按钮 ' + (hasUpdBtn ? '有' : '缺')
+    + ' / 点击处理 ' + (hasUpdHandler ? '有' : '缺')
+    + ' / GL.checkUpdate ' + (hasUpdEntry ? '有' : '缺') + '）—— 少一环就只是个按钮图案');
+}
+
+/* 必须走 reg.update() 强制重拉；配合 register 的 updateViaCache:'none' 才不被 HTTP 缓存骗 */
+if (/reg\.update\(\)/.test(app)) ok.push('检查更新走 reg.update() 强制重拉 sw.js（配合 updateViaCache:none）');
+else problems.push('GL.checkUpdate 里没有 reg.update() —— 点一万次也查不到新版');
+
+/* 查不动时必须说查不动。谎报「已是最新」比不检查更糟：用户以为没问题就不再管了 */
+if (/navigator\.onLine|onLine/.test(app)) ok.push('检查更新区分「离线 / 检查失败」与「已是最新」（查不动时不谎报最新）');
+else problems.push('app.js 没区分离线 —— 断网时会把「查不到」说成「已是最新」，比不检查更糟');
+
+/* 原生 APK 的网页资源是打包进包体的，应用内换不了 —— 文案必须分开写，不假装能自更新 */
+if (/isNativeApp\(\)[\s\S]{0,400}?打包进包体|打包进包体/.test(app)) {
+  ok.push('检查更新对原生包如实说明（APK 包体内的资源应用内换不了，只做版本核对）');
+} else {
+  problems.push('app.js 未对原生包说明差异 —— 会对 APK 用户谎称能自动更新，而包体是打包进去的');
+}
+
+/* sw.js 侧的兜底通道：新 SW 卡在 waiting 时，页面发消息催它上位 */
+const msgBody = (sw.match(/addEventListener\('message'[\s\S]*?\n\}\);/) || [''])[0];
+if (/SKIP_WAITING/.test(msgBody) && /self\.skipWaiting\(\)/.test(msgBody)) {
+  ok.push('sw.js 留有 SKIP_WAITING 兜底通道（新 SW 卡在 waiting 时页面能催它上位）');
+} else {
+  problems.push('sw.js 没有 SKIP_WAITING 的 message 处理 —— 「新 SW 停在 waiting」这种边角情况下，检查更新会一直等下去');
+}
+if (/await\s+self\.skipWaiting\(\)/.test(msgBody)) {
+  problems.push('sw.js 的 message 处理里写了 await self.skipWaiting() —— 与 install 里那个是同一个死锁');
+} else {
+  ok.push('message 处理里没有 await skipWaiting()（避开同一个死锁）');
+}
+
+/* 状态行得有落脚处，否则点完按钮毫无反馈 */
+if (/^\s*\.upd-state[\s,{.:]/m.test(cssSrc)) ok.push('style.css 有 .upd-state（检查进度 / 结果的反馈位）');
+else problems.push('style.css 缺 .upd-state —— 点完按钮没有任何反馈，用户不知道发生了什么');
 
 /* ---------- 输出 ---------- */
 ok.forEach((s) => console.log('  ✓ ' + s));

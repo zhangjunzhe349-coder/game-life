@@ -58,8 +58,14 @@
       与 app.js 里切页签时的收尾调用。
    ② css/style.css 与 js/skills.js / js/app.js 又变了一遍 —— 同一版本内未发布也要抬版本号，
       否则本地或任何已打开过 v17 的浏览器会继续用旧缓存里的浮层版。
+   v19 的改动（v1.9.0 · 设置页「检查更新」按钮）：
+   ① 新增 message 处理：页面上那个按钮在「新 SW 卡在 waiting」时可以发 SKIP_WAITING
+      让它立刻上位。正常路径用不到（新版 install 里本来就 skipWaiting()），这是兜底通道。
+      ⚠ 这一句**不能 await**，理由同 install 里那处 —— 见下面的注释。
+   ② js/app.js 变了（新增 GL.checkUpdate + 关于卡片多了按钮与说明）、css/style.css 也变了
+      （.upd-state）—— 前端资源有变就必须抬版本号，否则用户旧缓存继续供旧界面。
    ============================================================ */
-const CACHE = 'gamelife-v18';
+const CACHE = 'gamelife-v19';
 
 const ASSETS = [
   './',
@@ -154,4 +160,17 @@ self.addEventListener('fetch', (e) => {
       }).catch(() => (req.mode === 'navigate' ? caches.match('index.html') : Response.error()));
     })
   );
+});
+
+/* ── 「检查更新」按钮的兜底通道（v1.9.0）────────────────────────
+   页面侧 GL.checkUpdate() 若发现新 SW 卡在 waiting（旧版 SW 还在现役、
+   或浏览器没让它自动接管），会发这条消息让它立刻上位。
+   正常路径其实用不到 —— 新版 SW 在 install 里已经自己 skipWaiting() 了 ——
+   所以这是后门，不是主路。
+
+   ⚠ 同样**绝对不能 await** self.skipWaiting()：
+   它的 promise 要等「本 SW 变成 active」才 resolve，一 await 就死锁
+   （与 install 里那处是同一个坑，那里有完整说明）。 */
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });

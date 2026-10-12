@@ -25,10 +25,19 @@
      阶段 3 · 再打开一次，确认稳定（不是靠反复刷新碰运气）。
      可选  · --simulate-no-fix：把新版的三处修复全摘掉，预期断言失败。
               用来证明「这条断言真的有牙」—— 没有负向验证的测试是橡皮图章。
+     可选  · --simulate-button-noop：只摘掉「检查更新」按钮里的 reg.update()
+              （阶段 4 的负向验证）。主链路照常全过，阶段 4 必须报红；
+              若它还绿，说明那几条断言量的是「页面加载时的自动检查」而不是按钮。
+     可选  · --phase4-no-click：阶段 4 换成更新版后**一下都不点**（空白对照）。
+              用来校准「是按钮干的」这句话能不能说 —— 实测就是靠它才发现
+              「静置期版本自己变了」的假绿（加载期那次 reg.update() 晚到约 1s，
+              切完产物才打上来，替按钮把活干了）。
 
    用法：
      node tools/build-dist.js && node tools/test-update-flow.js
      node tools/build-dist.js && node tools/test-update-flow.js --simulate-no-fix
+     node tools/build-dist.js && node tools/test-update-flow.js --simulate-button-noop
+     node tools/build-dist.js && node tools/test-update-flow.js --phase4-no-click
    依赖：ws（同 browser-check.js，用 NODE_PATH 指向其 node_modules）
    ============================================================ */
 const http = require('http');
@@ -45,10 +54,26 @@ const SIMULATE_NO_FIX = process.argv.includes('--simulate-no-fix');
    这一条很关键 —— 若关掉它（no-store），阶段 2 的失败模式根本复现不出来，
    脚本就会变成一张永远打勾的橡皮图章。 */
 const NO_HTTP_CACHE = process.argv.includes('--no-http-cache');
+/* 阶段 4 专用的负向验证：把「检查更新」按钮里那一下 reg.update() 摘掉。
+   按钮还在、点了也照样有「正在检查…」的反馈 —— 只是底下什么都没查。
+   阶段 1–3（主链路）不受影响、照常通过；阶段 4 必须因此报红。
+   若它还能过，就说明那几条断言量的是别的东西（比如页面加载时的自动检查），不是按钮。 */
+const SIMULATE_BUTTON_NOOP = process.argv.includes('--simulate-button-noop');
+/* 阶段 4 的空白对照：换成更新版之后**一下都不点**。
+   用途是校准断言本身 —— 如果有别的东西（浏览器的后台更新检查、CDP 打开
+   ServiceWorker 域、页面自身的加载时检查…）也能把版本推上去，
+   那「点一下换到了新版」就证明不了是按钮干的，断言必须照着改。
+   健康的预期是：不点，版本就该一直停在原处。 */
+const PHASE4_NO_CLICK = process.argv.includes('--phase4-no-click');
 const PORT = 8141;
 const CDP_PORT = 9351;
 const NewDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gl-upd-new-'));
 const OldDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gl-upd-old-'));
+/* 阶段 4 的第二份「更新版」产物。声明在模块级是**必须的** ——
+   srv 的请求处理函数里要按 SERVE 判断正供哪一份，那是模块级闭包；
+   若把它 const 在阶段 4 的块里，请求处理函数在它之前执行就会撞 TDZ
+   （实测：ReferenceError: New2Dir is not defined，整个脚本崩在阶段 4 开头）。 */
+const New2Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gl-upd-new2-'));
 const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'gl-upd-profile-'));
 
 const MIME = {
@@ -61,6 +86,9 @@ const MIME = {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let SERVE = OldDir;
+/* sw.js 被请求的次数。它是「更新检查真的发生了」唯一可靠的地面真值 ——
+   阶段 4 靠它等到「页面加载时那次检查」落地之后，才敢换产物，否则会假绿。 */
+let swReqCount = 0;
 const srv = http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split('?')[0]);
   /* SW 的自报信道：不依赖 clients、不依赖缓存，直接打到服务器。
@@ -73,6 +101,14 @@ const srv = http.createServer((req, res) => {
     return;
   }
   if (p === '/') p = '/index.html';
+  /* sw.js 的每一次请求都记一笔：定位「到底是谁在什么时候去查更新」的唯一硬证据。
+     阶段 4 就靠它才看明白 —— 加载期那次 reg.update() 的请求会晚到，
+     切完产物之后才打上来，于是替按钮把活干了。 */
+  if (p === '/sw.js') {
+    const which = SERVE === OldDir ? '旧版' : (SERVE === NewDir ? '当前版' : (SERVE === New2Dir ? '更新版' : '?'));
+    swReqCount++;
+    console.log('      [' + new Date().toISOString().slice(11, 23) + ' sw.js] 正供 ' + which + '（第 ' + swReqCount + ' 次）');
+  }
   const fp = path.join(SERVE, p);
   if (!fp.startsWith(SERVE)) { res.writeHead(403).end(); return; }
   fs.readFile(fp, (err, buf) => {
@@ -336,6 +372,16 @@ const check = (ok, label, detail) => results.push({ ok, label, detail });
     fs.writeFileSync(q, j2, 'utf8');
   }
 
+  if (SIMULATE_BUTTON_NOOP) {
+    /* 阶段 4 的负向验证：把按钮那一下 reg.update() 换成空 promise。
+       其余一字不动 —— 按钮在、反馈文案在、状态行在，只是不再去查。 */
+    const q = path.join(NewDir, 'js/app.js');
+    const j = fs.readFileSync(q, 'utf8');
+    const j2 = j.replace(/const doing = reg\.update\(\)/, 'const doing = Promise.resolve()');
+    if (j2 === j) { console.error('✗ 负向验证：摘不掉「检查更新」里的 reg.update()（结构变了？）'); process.exit(1); }
+    fs.writeFileSync(q, j2, 'utf8');
+  }
+
   /* ---------- 给新版 sw.js 注入「自报步骤」，让 activate 每一步都说话 ----------
      为什么必须这么做：外部只能看到「缓存建了没」「谁是现役」，
      而「activate 到底走到哪一行停住」只有 SW 自己知道。
@@ -462,7 +508,13 @@ self.addEventListener('activate', () => {
     check(m1.padTop >= 40, `顶部预留了系统状态栏（实测 ${m1.padTop}px ≥ 40px；旧版为 ${base && base.padTop}px）`);
     check((m1.swCaches || []).includes(NEW_CACHE) && !(m1.swCaches || []).includes(OLD_CACHE),
       `缓存已换代（现存 ${(m1.swCaches || []).join('/')}）`);
-    check(docs <= 2, `换版只刷新一次、没有陷入刷新循环（本阶段见过 ${docs} 个不同文档）`);
+    /* 这里判的是**「没有陷入刷新循环」**，不是「只刷一次」。
+       两个独立机制都可能刷一次：页面侧监听 controllerchange 自刷（主力）
+       + sw.js 在 activate 后延迟一拍 navigate 各窗口（救「页面上跑的还是没有
+       controllerchange 监听的旧代码」那一次）。两者都命中就是 3 个文档，
+       属于设计内的行为，不是 bug —— 原先写死 ≤2 会偶发报红（实测见到过）。
+       真出循环会是几十个文档，所以 ≤3 一样能把循环钉死。 */
+    check(docs <= 3, `换版没有陷入刷新循环（本阶段见过 ${docs} 个不同文档；2 = 刷一次，3 = 两个兜底机制各刷一次）`);
   }
 
   /* ---------- 阶段 3：再打开一次，确认稳定 ---------- */
@@ -479,6 +531,148 @@ self.addEventListener('activate', () => {
   } else {
     check(!!two && !two.__err && two.ver === NEW_VER && two.booted, `再次打开仍是新版且启动完好（v${two && two.ver}）`);
     check(!!two && !two.__err && two.controlled, '新版下 SW 仍正常工作（离线能力没被破坏）');
+  }
+
+  /* ---------- 阶段 4：手动点「检查更新」也能换代（v1.9.0） ----------
+     为什么要单独测这一条：页面加载时那次自动检查（reg.update，阶段 2/3 已证明管用）
+     与用户在设置页按的那个按钮是**两条路**。按钮最容易退化成安慰剂 ——
+     点完弹一句「已是最新」，底下其实什么都没查；界面看着更"完整"了，
+     实际是把「看不到新版」这件事藏得更深。
+
+     为了让「只有按钮起作用」这个前提成立：先按**当前版**（NewDir）把页面打开，
+     等它加载时那次自动检查跑完（对着同一份产物，自然不会发现任何东西）；
+     **之后**才把服务器上的产物换成更新的一版（New2Dir）。
+     此后能发现新版的就只剩「点按钮」这一条路了 —— 按钮要是空壳，
+     页面就会一直停在旧版上，跑不出新版。
+
+     ⚠ 关键细节：按钮引发的自刷会把求值上下文打断，所以我让**页面自己**在
+     sessionStorage 里记录状态文案（它会跨自刷保留），而不是靠外部轮询去抓 ——
+     外部轮询很可能一次都没采到就赶上刷新，那会把「没采到」误判成「按钮没反应」。
+
+     ⚠ 第二个关键细节（实测踩到，差点让整条断言变成假绿）：切产物必须等一个
+     **真正的同步点**，不能「页面一起来就切」。加载期那次 reg.update() 的 sw.js 请求
+     会晚到约 1 秒；切完目录它才打上来，拿到的是更新版的 sw.js —— 于是它替按钮把版本
+     推上去了，按钮一下没点也能"通过"。现在改成：等服务器端 sw.js 请求计数涨过基线
+     再切，切完静置数秒并**断言版本没动**。`--phase4-no-click` 是这条的空白对照。
+
+     --simulate-no-fix 模式下阶段 3 的结论本身就已经反过来，这一阶段没有意义，跳过。 */
+  let NEW2_VER = null;
+  if (SIMULATE_NO_FIX) {
+    console.log('  阶段 4 · 跳过（负向验证模式：只验主链路有没有牙）');
+  } else {
+    /* ⚠ 这里**不能**再 `const New2Dir = …`：上面模块级已经声明了一个，
+       块级再声明会把它遮蔽掉，而 srv 的请求处理函数（模块级闭包）用的是外面那个 ——
+       于是日志里「正供 ?」永远判不出来。第一版就是这么写的。 */
+    fs.cpSync(NewDir, New2Dir, { recursive: true });
+    const bump = (file, re, to, tag) => {
+      const p = path.join(New2Dir, file);
+      const s = fs.readFileSync(p, 'utf8');
+      const s2 = s.replace(re, to);
+      if (s2 === s) { console.error(`✗ 阶段 4：改不掉 ${file} 的${tag}（结构变了？）`); process.exit(1); }
+      fs.writeFileSync(p, s2, 'utf8');
+    };
+    bump('sw.js', /const CACHE = '[^']+';/, "const CACHE = 'gamelife-vNEXT';", 'CACHE');
+    bump('js/app.js', /const APP_VERSION = '[^']+';/, "const APP_VERSION = '9.9.9';", 'APP_VERSION');
+    NEW2_VER = readVer(New2Dir);
+
+    SERVE = NewDir;
+    console.log('  阶段 4 · 手动「检查更新」：页面先停在当前版，之后才换产物，只靠点按钮换代…');
+    const docs4 = new Set();
+    const btnRun = await withPage(WS, async (ev) => {
+      const rec = async (e) => {
+        const m = await ev(e);
+        if (m && !m.__err && m.docId) docs4.add(m.docId);
+        return m;
+      };
+      const start = await waitFor(rec, (m) => m.ver === NEW_VER && m.booted, 30000);
+      const hasBtn = await rec(`(() => { const b = document.getElementById('btn-check-update'); return b ? 'yes' : 'no'; })()`);
+      if (!start.hit || hasBtn !== 'yes') {
+        return { start, hasBtn, seen: '', after: null, docs: docs4.size };
+      }
+
+      /* 到这一步，页面已经起来了。但**不能马上换产物** ——
+         实测踩到的坑：页面加载时那次自动检查（start() 里的 register(...).then(reg => reg.update())）
+         的 sw.js 请求会晚到约 1 秒；切完目录它才打上来，于是拿到的是「更新版」的 sw.js，
+         它就把版本推上去了 —— 按钮一下没点，本阶段却能"通过"，是彻头彻尾的假绿。
+
+         所以先等一个**真正的同步点**：服务器端 sw.js 请求计数涨了，
+         才证明「加载期那次检查确实已经发生并落地」。再让一拍，然后才换产物。
+         之后静置数秒并**断言版本没动** —— 这一条既是安全网，也是「此刻能推版本的
+         只剩按钮」这个前提的地面真值（拿 --phase4-no-click 可以校准它）。 */
+      const n0 = swReqCount;
+      let synced = false;
+      for (let i = 0; i < 40 && !synced; i++) {
+        await sleep(200);
+        synced = swReqCount > n0;
+      }
+      if (!synced) console.log('      [注意] 等加载期更新检查超时（8s），继续跑 —— 下面的隔离断言可能报红');
+      await sleep(900);   // 再让一拍，防止同一次检查还跟着第二个请求
+
+      SERVE = New2Dir;
+      const idle = await waitFor(rec, (m) => m.ver === NEW2_VER && m.booted, 3000);
+      const idleNotMoved = !idle.hit;
+
+      if (PHASE4_NO_CLICK) {
+        /* 空白对照：一下都不点，看版本会不会自己变（校准断言用，见文件头） */
+        console.log('      [对照] 已换成更新版，但**不点按钮**，继续观察到 20s…');
+        const idle20 = await waitFor(rec, (m) => m.ver === NEW2_VER && m.booted, 15000);
+        const probe = await rec(`((document.getElementById('upd-state') || {}).textContent || '').trim()`);
+        return { start, hasBtn, seen: '', after: idle20, docs: docs4.size, idleNotMoved,
+          note: `不点按钮：静置 5s ${idleNotMoved ? '版本未动' : '版本就已自己变成新版'}；`
+            + `到 20s → ver=${(idle20.m && idle20.m.ver) || '?'}，状态行「${probe}」` };
+      }
+
+      await rec(`(() => {
+        try { sessionStorage.removeItem('__updSeen'); } catch (e) {}
+        const b = document.getElementById('btn-check-update');
+        if (b) b.click();
+        /* 页面内高频记录状态文案，写进 sessionStorage —— 它会**跨自刷保留**，
+           所以就算按钮引发的刷新把求值上下文打断，记录也还在。
+           用 indexOf 累加去重，不用正则：这是浏览器求值串（模板字符串），
+           里面的反斜杠会掉一层（v1.8.2 已因此踩过一次 SyntaxError）。 */
+        const st = document.getElementById('upd-state');
+        const t0 = Date.now();
+        const id = setInterval(() => {
+          try {
+            const t = ((st && st.textContent) || '').trim();
+            if (t) {
+              const prev = sessionStorage.getItem('__updSeen') || '';
+              if (prev.indexOf(t) === -1) sessionStorage.setItem('__updSeen', prev + '|' + t);
+            }
+          } catch (e) {}
+          if (Date.now() - t0 > 6000) clearInterval(id);
+        }, 50);
+        return 'clicked';
+      })()`);
+
+      const after = await waitFor(rec, (m) => m.ver === NEW2_VER && m.booted, 30000);
+      const seen = await rec(`(() => { try { return sessionStorage.getItem('__updSeen') || ''; } catch (e) { return ''; } })()`);
+      return { start, hasBtn, seen: typeof seen === 'string' ? seen : '', after, docs: docs4.size, idleNotMoved };
+    });
+    const b4 = btnRun.out || {};
+    const bm = (b4.after && b4.after.m) || {};
+    const seen = b4.seen || '';
+    if (PHASE4_NO_CLICK) {
+      /* 对照模式只报告、不下断言：结论用来校准「是按钮干的」这句话能不能说 */
+      console.log('      ' + (b4.note || '(无数据)'));
+    } else {
+      const verOk = bm.ver === NEW2_VER && bm.booted;
+      /* 先守隔离性：静置期版本要是自己动了，下面的结论全都不可信，必须显式报红 */
+      check(!!b4.idleNotMoved,
+        '隔离成立：换成更新版后静置 5s，版本没自己动（排除加载期自动检查的竞态替按钮干活）',
+        b4.idleNotMoved ? '' : '还没点按钮版本就自己变了 —— 这一阶段的结论不可信（见 --phase4-no-click 对照）');
+      check(verOk,
+        `点一下「检查更新」真的换到了新版（v${bm.ver}，缓存 ${(bm.swCaches || []).join('/')}）`
+        + ' —— 静置期它一直没动，所以只可能是按钮起了作用',
+        verOk ? '' : '状态行采样：' + (seen || '(空)') + '\n      ' + JSON.stringify(bm));
+      check(seen.indexOf('发现新版本') !== -1,
+        '按钮自己报出了「发现新版本」（证据是页面自己写的，跨自刷保留）',
+        seen.indexOf('发现新版本') !== -1 ? '' : '只采到：' + (seen || '(空)'));
+      check(seen.indexOf('已是最新') === -1,
+        '确实有新版时，按钮不会说「已是最新」（不谎报）',
+        seen.indexOf('已是最新') === -1 ? '' : '明明换了产物，却报「已是最新」');
+      check(b4.docs <= 3, `按钮换代没有陷入刷新循环（本阶段见过 ${b4.docs} 个不同文档）`);
+    }
   }
 
   /* ---------- 输出 ---------- */

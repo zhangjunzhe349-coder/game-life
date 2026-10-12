@@ -276,6 +276,10 @@ function check(ok, label, detail) {
       /* v1.8.2 设置页：只剩「数据管理」与「关于」两张卡，且带导出结果容器 */
       settingsCards: document.querySelectorAll('#panel-settings .card').length,
       settingsExportBox: !!document.getElementById('export-result'),
+      /* v1.9.0 设置页「检查更新」（PWA 换版自愈的显式入口） */
+      updBtn: !!document.getElementById('btn-check-update'),
+      updStateText: ((document.getElementById('upd-state') || {}).textContent || '').trim() || null,
+      updNoteText: ((document.getElementById('upd-note') || {}).textContent || '').trim() || null,
       injectedAttrs: document.querySelectorAll('[data-page-node-id]').length,
       attrGroups: groups.length,
       attrRows: rows.length,
@@ -407,6 +411,45 @@ function check(ok, label, detail) {
      在改动说明的注释里会自然出现，拿字符串去 grep 源码会误报。 */
   check(S.settingsCards === 2, '设置页只剩两张卡（数据管理 / 关于）', `实际 ${S.settingsCards} 张`);
   check(S.settingsExportBox === true, '数据管理里有导出结果容器（导出后要显示文件去哪了）');
+
+  /* ---------- 「检查更新」按钮（v1.9.0）----------
+     这类按钮最容易退化成安慰剂：点完弹一句「已是最新」，底下其实什么都没查。
+     所以这里**真点一遍**，要求它走到一个明确的终态、并且状态行确实变了。
+     本环境是 http://127.0.0.1（安全上下文），SW 已注册且磁盘上的 sw.js 与已装的一致
+     → 正常结论就是「已是最新」（不触发刷新，不会把这一轮校验打断）。 */
+  check(S.updBtn === true, '设置页有「检查更新」按钮（关于卡片里）');
+  check(!!S.updStateText && /v\d+\.\d+\.\d+/.test(S.updStateText),
+    '检查更新旁边标着当前版本号', String(S.updStateText));
+  check(!!S.updNoteText && S.updNoteText.length > 10,
+    '关于卡片如实说明这个按钮做什么（不是只画个按钮）', String(S.updNoteText).slice(0, 46));
+
+  const upd = await ev(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = { before: null, after: null, settled: null, kind: null };
+    const st = document.getElementById('upd-state');
+    const btn = document.getElementById('btn-check-update');
+    if (!st || !btn) return out;
+    out.before = (st.textContent || '').trim();
+    btn.click();
+    /* 只认「明确的终态」—— 停在「正在检查…」不算通过。
+       终态用 indexOf 判，不用正则：这段是浏览器求值串（模板字符串），
+       里面的反斜杠会掉一层（v1.8.2 已经因此踩过一次 SyntaxError）。 */
+    const TERMINAL = ['已是最新', '当前离线', '检查失败', '检查超时', '不支持', '原生包'];
+    for (let i = 0; i < 40; i++) {
+      await sleep(250);
+      const t = (st.textContent || '').trim();
+      if (TERMINAL.some((k) => t.indexOf(k) !== -1)) { out.settled = t; break; }
+    }
+    out.after = (st.textContent || '').trim();
+    out.kind = st.dataset.kind || '';
+    out.reenabled = btn.disabled === false;
+    return out;
+  })()`);
+  check(!!upd.settled, '检查更新：点一下会走到明确终态（不会永远停在「正在检查…」）',
+    `终态「${upd.settled || upd.after}」`);
+  check(upd.before !== upd.after, '检查更新：状态行真的被刷新（不是点了没反应）',
+    `${upd.before} → ${upd.after}`);
+  check(upd.reenabled === true, '检查更新：检查结束后按钮恢复可点（不会一次点死）');
 
   /* ---------- 电子衣橱（v1.8.0 照片版 / v1.8.1 去立绘）----------
      静态检查全都看不出「页面能看、点不动」，所以这一段**必须真点一遍**：

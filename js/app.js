@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.8.2';
+  const APP_VERSION = '1.9.0';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 顶部 HUD 读数 ----------
@@ -125,7 +125,23 @@
         Game Life v${APP_VERSION} · 个人信息 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 / 电子衣橱<br>
         本地优先 · 无需登录 · 数据自主可控。后续可拓展：智能硬件自动同步、多端云同步、照片生成真实比例模型。
       </div>
+      <div class="set-row">
+        <button class="btn" id="btn-check-update">🔄 检查更新</button>
+        <span class="upd-state" id="upd-state"><i>当前</i> v${APP_VERSION}</span>
+      </div>
+      <div class="dim" id="upd-note" style="margin-top:12px"></div>
     </div>`;
+
+    /* 说明文案按运行形态分开写 —— 网页与原生包能做的事**根本不同**，
+       写成一样就等于骗原生包用户（用户的「APP」多半是主屏上的 PWA，但要如实区分）。 */
+    const note = el.querySelector('#upd-note');
+    if (note) {
+      note.innerHTML = GL.isNativeApp()
+        ? '安卓安装包（APK）里的网页资源是<b>打包进包体</b>的，应用内换不了包体本身 —— '
+          + '这里只做版本核对；若想换版，请到下载页重新安装。'
+        : '点一下会向服务器核对版本：有新版本立即下载并自动刷新，<b>不用退出 App 重开</b>。<br>'
+          + '平时每次打开 App 也会自动检查一次；从主屏图标唤起时若复用了后台那张页面，就靠这个按钮补一下。';
+    }
   }
 
   /* 导出结果面板：文件名 / 大小 / 保存位置（按平台判定）+ 复制路径 + 另存一份。
@@ -190,6 +206,8 @@
         const box = el.querySelector('#export-result');
         const f = box && box._file;
         if (f && navigator.share) navigator.share({ files: [f], title: f.name }).catch(() => {});
+      } else if (e.target.id === 'btn-check-update') {
+        GL.checkUpdate();
       } else if (e.target.id === 'btn-reset') {
         if (!confirm('⚠️ 将清空全部数据并恢复默认（含所有历史记录），确定继续吗？')) return;
         GL.reset();
@@ -215,6 +233,152 @@
       e.target.value = '';
     });
   }
+
+  /* ---------- 换版自愈 · 共用件（v1.9.0） ----------
+     「自动（打开页面时）」与「手动（点检查更新）」两条路都汇到 reloadForUpdate()：
+     刷新前先落盘 + **单次守卫**（两个入口可能几乎同时到达，
+     各自 location.reload() 会让页面抖两下）。 */
+  let reloadedForUpdate = false;
+  const UPD_FLAG = 'gamelife-updated';
+
+  function reloadForUpdate() {
+    if (reloadedForUpdate) return;
+    reloadedForUpdate = true;
+    try { GL.save(); } catch (e) { /* 状态本来就存着，这里只为万一 */ }
+    location.reload();
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /* ---------- 检查更新（v1.9.0） ----------
+     为什么需要这个按钮：SW 的自动更新检查**只在页面加载时发生**（见 start() 里的
+     register + reg.update）。手机上把 PWA 添加到主屏之后，从主屏图标唤起往往复用
+     已在后台的那张页面 —— 注册流程不会再跑一次，自动检查也就不会发生，用户看到的
+     一直是旧界面，只能「完全退出 App 再重开一次」（v1.7.4 事故残留的那个场景）。
+     按钮把这条链路变成显式可控：强制 reg.update() → 新 SW 装上 →
+     install 里的 skipWaiting() + activate 里的 clients.claim() → controllerchange
+     → 页面自刷一次。全程不需要用户退出 App。
+
+     判据：SW 的更新检查**没有**「我没有新版本」这种直接回调，只能反推 ——
+     `update()` 的 promise 在「sw.js 取回、字节比对完毕」之后 resolve，
+     真有新版的话此刻 reg.installing（或 waiting）已经就位。
+     所以「查完仍然没有新 worker 进来」= 已是最新。（Workbox 一类库也是这个思路。）
+
+     三种形态如实说，不假装：
+       · 网页 / PWA（https）—— 真能自更新；
+       · 离线 —— 直说离线，不谎报「已是最新」；
+       · 原生 APK —— 网页资源打包在包体里，应用内换不了，只做版本核对。 */
+  const UPDATE_TIMEOUT = 8000;
+
+  function newWorkerIn(reg, before) {
+    return !!((reg.installing && reg.installing !== before)
+      || (reg.waiting && reg.waiting !== before));
+  }
+
+  /* 兜底通道：新 SW 若卡在 waiting（理论上不该发生 —— 新版 install 里已 skipWaiting()），
+     发条消息让它立刻上位。sw.js 里有对应的 message 处理。 */
+  function promoteWaiting(reg) {
+    if (reg && reg.waiting) {
+      try { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch (e) { /* ignore */ }
+    }
+  }
+
+  GL.checkUpdate = async function () {
+    const stateEl = document.getElementById('upd-state');
+    const btn = document.getElementById('btn-check-update');
+    const say = (text, kind) => {
+      if (!stateEl) return;
+      stateEl.textContent = text;
+      stateEl.dataset.kind = kind || '';
+    };
+    const finish = (r) => { if (btn) btn.disabled = false; return r; };
+
+    /* file:// 打开、或原生 WebView 不给 SW —— 如实说，不假装能更新 */
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.getRegistration) {
+      say(GL.isNativeApp() ? '原生包：请到下载页获取新版' : '当前环境不支持自动更新（需用 https 打开）', 'warn');
+      return 'unsupported';
+    }
+    if (btn) btn.disabled = true;
+    if (!navigator.onLine) { say('当前离线，无法检查更新', 'warn'); return finish('offline'); }
+
+    say('正在检查…', 'busy');
+
+    let reg = null;
+    try { reg = await navigator.serviceWorker.getRegistration(); } catch (e) { reg = null; }
+    if (!reg) {
+      /* 没有注册记录（本页面是在 SW 被清掉之后打开的）→ 现注册一次；
+         这次注册本身就会去取最新 sw.js。 */
+      try { reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }); }
+      catch (e) { say('检查失败：连不上更新服务', 'err'); return finish('error'); }
+    }
+
+    const before = reg.active || null;
+
+    /* 还没有现役 SW = 首次安装，不是「有新版」——
+       这时若往下走，下面「有新 worker 进来」的判据会把首次安装误报成「发现新版本」。 */
+    if (!before) {
+      say('正在完成首次安装…', 'busy');
+      await sleep(1500);
+      say(`已是最新（v${APP_VERSION}）`, 'ok');
+      return finish('latest');
+    }
+
+    /* 已经躺着一个「装好了但还没接管」的新 SW → 直接让它上位，省一次网络往返 */
+    if (reg.waiting) {
+      say('发现新版本，正在应用…', 'busy');
+      GL.toast('发现新版本，正在更新…', 'ok');
+      try { sessionStorage.setItem(UPD_FLAG, '1'); } catch (e) { /* ignore */ }
+      promoteWaiting(reg);
+      setTimeout(reloadForUpdate, 900);
+      return 'updating';
+    }
+
+    /* 关键一步：强制重拉 sw.js。register 时写的 updateViaCache:'none' 保证这一步
+       不会被 HTTP 缓存骗过去（否则拿回旧字节 → 浏览器认定「没有新版」）。 */
+    let settled = false;
+    let failed = false;
+    const onFound = () => { settled = true; };
+    try { reg.addEventListener('updatefound', onFound); } catch (e) { /* ignore */ }
+    const doing = reg.update().then(
+      () => { settled = true; },
+      () => { settled = true; failed = true; });
+    await Promise.race([doing, sleep(UPDATE_TIMEOUT)]);
+    try { reg.removeEventListener('updatefound', onFound); } catch (e) { /* ignore */ }
+
+    if (!settled) { say('检查超时，请检查网络后重试', 'warn'); return finish('timeout'); }
+    if (failed) { say('检查失败：连不上更新服务', 'err'); return finish('error'); }
+
+    /* 个别浏览器 updatefound 与 installing 的赋值差一拍，让一拍再判 */
+    if (!newWorkerIn(reg, before)) await sleep(400);
+
+    if (newWorkerIn(reg, before)) {
+      say('发现新版本，正在更新…', 'busy');
+      GL.toast('发现新版本，正在更新…', 'ok');
+      const w = reg.installing || reg.waiting;
+      if (w) {
+        /* 等它走到 activated 再刷：新版 install 里已 skipWaiting()，正常立刻就到。
+           若 2.5s 还没到位也刷一次（宁可多刷一下，不让用户干等）。
+           `reloadForUpdate` 有单次守卫，与页面侧 controllerchange 那条路不会刷两回。 */
+        const done = (certain) => {
+          if (certain) { try { sessionStorage.setItem(UPD_FLAG, '1'); } catch (e) { /* ignore */ } }
+          reloadForUpdate();
+        };
+        if (w.state === 'activated') setTimeout(() => done(true), 500);
+        else {
+          w.addEventListener('statechange', () => {
+            if (w.state === 'activated') setTimeout(() => done(true), 500);
+          });
+          setTimeout(() => promoteWaiting(reg), 900);
+          setTimeout(() => done(false), 2500);
+        }
+      }
+      return 'updating';
+    }
+
+    say(`已是最新（v${APP_VERSION}）`, 'ok');
+    GL.toast('已是最新版本 v' + APP_VERSION, 'ok');
+    return finish('latest');
+  };
 
   /* ---------- 启动 ---------- */
   /* 每个步骤独立兜错：任何一个模块出问题，都不该让整页停在 opacity:0 的白屏。
@@ -252,6 +416,16 @@
       document.querySelectorAll('.rv:not(.in)').forEach((e) => e.classList.add('in'));
     }, 1200);
 
+    /* 换版回来：说一声「刚才那一下真的生效了」——
+       点完按钮页面一闪就走，不提一句用户不知道到底更新没有。
+       只在**确认走到 activated 之后**才留的旗标，所以不会谎报。 */
+    try {
+      if (sessionStorage.getItem(UPD_FLAG)) {
+        sessionStorage.removeItem(UPD_FLAG);
+        GL.toast('已更新到最新版本 v' + APP_VERSION, 'ok');
+      }
+    } catch (e) { /* sessionStorage 被禁也不影响主流程 */ }
+
     /* Service Worker（PWA 离线 + 安装 + 换版自愈）
        ─────────────────────────────────────────────────────────
        下面两段一起解决「装了新版却什么都没变」（v1.7.4 实机事故）：
@@ -274,12 +448,9 @@
         .catch(() => {});
 
       if (navigator.serviceWorker.controller) {
-        let reloadedForUpdate = false;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (reloadedForUpdate) return;
-          reloadedForUpdate = true;
-          location.reload();
-        });
+        /* 自刷走 reloadForUpdate()，与「检查更新」按钮共用同一条路径 + 同一个单次守卫
+           （按钮那条路可能先触发刷新，两个入口都各自 location.reload() 会让页面抖两下） */
+        navigator.serviceWorker.addEventListener('controllerchange', reloadForUpdate);
       }
     }
 

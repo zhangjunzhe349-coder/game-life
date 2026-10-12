@@ -959,6 +959,25 @@ input[type="range"] { flex: 1; accent-color: var(--accent); height: 30px; }
 .sp-how { font-size: var(--fs-xs); line-height: 1.7; color: var(--muted); }
 .sp-how b { color: var(--text); font-weight: 500; }
 
+/* —— 检查更新（v1.9.0）——
+   按钮在「关于」卡片里。SW 的自动更新检查**只在页面加载时**发生；手机上把 PWA
+   添加到主屏后从图标唤起往往复用已在后台的页面，注册流程不重跑、自动检查也就不发生，
+   用户只能「完全退出 App 再重开一次」。这个按钮把那条链路变成显式可控的。
+   状态文案按 data-kind 分色，四档全部取自顶部变量，无硬编码。 */
+.upd-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.12em; color: var(--faint);
+  transition: color var(--dur-fast) ease-out;
+}
+.upd-state i { font-style: normal; }
+.upd-state[data-kind="busy"] { color: var(--xp); }
+.upd-state[data-kind="ok"] { color: var(--accent); }
+.upd-state[data-kind="warn"] { color: var(--xp); }
+.upd-state[data-kind="err"] { color: var(--danger); }
+/* 检查进行中把按钮按住，避免连点开出一串并发的更新检查 */
+.btn:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+
 /* ============ Toast ============ */
 #toast-box {
   position: fixed; top: var(--s4); left: 50%; transform: translateX(-50%);
