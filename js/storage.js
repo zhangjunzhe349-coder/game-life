@@ -202,6 +202,26 @@
     ];
   }
 
+  /* 每日必做（v1.10.0）：默认 5 项，**逐字照录**用户 2026-10-31 发来的截图。
+     ⚠ 第 3 项（健身/跑步）的小字在他的 App 里被省略号截断了（「…大脑可塑性个 …」），
+       **没有把握的部分不猜** —— 留空，等他自己点进去补。
+     这是用户数据（不是内置定义表），所以 id 用随机 uid，不走「固定 key」那套迁移。 */
+  const DAILY_SEED = [
+    { title: '整理外脑1h', note: '这是进化的必备条件', emoji: '🧠' },
+    { title: '阅读', note: '以输出为目标学习', emoji: '📖' },
+    { title: '健身/跑步（早上拉筋）', note: '', emoji: '💪' },
+    { title: '冥想/学英语', note: '呼吸是沟通理性脑和本能脑唯一的桥梁', emoji: '💡' },
+    { title: '录视频(练音)', note: '输出是最好的学习', emoji: '💻' },
+  ];
+
+  GL.DAILY_SEED = DAILY_SEED;
+
+  function docDailies() {
+    return DAILY_SEED.map((d) => ({
+      id: GL.uid(), title: d.title, note: d.note, emoji: d.emoji, doneOn: null
+    }));
+  }
+
   /* 一键写入《技能篇》预设的能力仍保留在 docSkills / docAttributes / docFields，
      但设置页那张「技能篇预设」卡已按用户要求撤掉（属于与用户体验无关的信息），
      旧入口 GL.applyDocPreset 随之删除 —— 留在仓里就是死代码。 */
@@ -224,6 +244,7 @@
       },
       attributes: docAttributes(),
       skills: docSkills(),
+      dailies: docDailies(),
       life: { birthDate: '1996-06-01', expectancy: 80 }
     };
   }

@@ -53,8 +53,9 @@
         <div class="readouts" id="hud-readouts"></div>
       </header>
 
-      <!-- 个人信息：顶替原立绘位，只占一条（身高 / 体重 / 肌肉量 / 发型，可直接改） -->
-      <section class="profile rv" data-d="2" id="profile-card" aria-label="个人信息"></section>
+      <!-- 每日必做：v1.10.0 起顶替原「个人信息」条（用户要求去掉个人信息，
+           让这一排排可打勾、可增删改的事项直接跟在「角色状态」下面） -->
+      <section class="dailies rv" data-d="2" id="dailies-card" aria-label="每日必做"></section>
 
       <div class="hud">
         <!-- 左翼：属性面板 -->
@@ -92,6 +93,7 @@
 <script src="js/attributes.js"></script>
 <script src="js/skills.js"></script>
 <script src="js/life.js"></script>
+<script src="js/dailies.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -64,8 +64,13 @@
       ⚠ 这一句**不能 await**，理由同 install 里那处 —— 见下面的注释。
    ② js/app.js 变了（新增 GL.checkUpdate + 关于卡片多了按钮与说明）、css/style.css 也变了
       （.upd-state）—— 前端资源有变就必须抬版本号，否则用户旧缓存继续供旧界面。
+   v20 的改动（v1.10.0 · 首页「每日必做」顶替「个人信息」）：
+   ① 新增 js/dailies.js 并进预缓存；index.html 里 #profile-card 换成 #dailies-card，
+      js/storage.js 的 defaults() 多了 state.dailies（默认 5 项）。
+   ② css/style.css 与 index.html 都改了 —— 不抬版本号，手机主屏上的旧缓存会继续供
+      「个人信息条」那一版，看起来像改动没发出去。
    ============================================================ */
-const CACHE = 'gamelife-v19';
+const CACHE = 'gamelife-v20';
 
 const ASSETS = [
   './',
@@ -94,6 +99,7 @@ const ASSETS = [
   'js/attributes.js',
   'js/skills.js',
   'js/life.js',
+  'js/dailies.js',
   'js/app.js'
 ];
 

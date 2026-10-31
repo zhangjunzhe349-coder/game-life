@@ -150,7 +150,7 @@ function cdpGet(port, p) {
    量出来的其实是「我采样了几次」，不是「页面加载了几次」。 */
 const MARKS = `(async () => {
   const g = window.GL || {};
-  const pf = document.getElementById('profile-card');
+  const dl = document.getElementById('dailies-card');
   const main = document.getElementById('main');
   /* SW 生命周期的**现场记录**：光看「缓存建没建」会骗人 ——
      新 SW 完全可能已经把缓存建好了却停在 waiting（install 的 waitUntil 没结束、
@@ -187,9 +187,9 @@ const MARKS = `(async () => {
        <body> 末尾的脚本还没跑）。所以额外记录「应用真的起来了」的证据。 */
     booted: !!(g.state && g.state.attributes),
     hudReadouts: (document.getElementById('hud-readouts') || { children: [] }).children.length,
-    /* 个人信息条（v1.8.1 起顶替中央立绘）：字段数 = 渲染链完整跑通的证据。
-       旧版 v1.8.0 只有 stage-base，没有 .pf-field —— 所以它同时是「新版真的生效」的判据。 */
-    pfFields: pf ? pf.querySelectorAll('.pf-field').length : -1,
+    /* 每日必做（v1.10.0 起顶替个人信息条）：条目数 = 渲染链完整跑通的证据。
+       旧版（≤ v1.9.0）没有 #dailies-card，所以它也是「新版真的生效」的判据。 */
+    dlItems: dl ? dl.querySelectorAll('.dl-item').length : -1,
     portraitGone: !document.getElementById('portrait-svg'),
     /* v1.8.2 的两条「新代码真的跑起来了」判据：
        设置页只剩 2 张卡、技能默认是 13 个紧凑小卡。
@@ -492,16 +492,16 @@ self.addEventListener('activate', () => {
     check(m1.ver !== NEW_VER, `负向验证：摘掉修复后，打开一次**看不到**新版（实测 v${m1.ver}）—— 说明这条断言真的有牙`,
       m1.ver === NEW_VER ? '竟然变成新版了，说明测试没复现出问题，断言不可信' : '');
   } else {
-    check(oneTime, `打开一次即看到新版且启动完好（v${m1.ver}，读数 ${m1.hudReadouts} 项、个人信息 ${m1.pfFields} 组字段${one.hit ? `，${one.ms}ms 内` : '，超时未完成'}）`,
+    check(oneTime, `打开一次即看到新版且启动完好（v${m1.ver}，读数 ${m1.hudReadouts} 项、每日必做 ${m1.dlItems} 条${one.hit ? `，${one.ms}ms 内` : '，超时未完成'}）`,
       oneTime ? '' : detail(''));
-    /* v1.8.1 的换版判据：立绘没了、个人信息条在。
+    /* v1.8.1 的换版判据：立绘没了；v1.10.0 起再补一条「每日必做在」。
        光看 VERSION 字符串只能证明「文档换了」，这两条才能证明「新代码真的跑起来了」。 */
     check(m1.portraitGone === true, `中央立绘已随之移除（#portrait-svg 不存在：${m1.portraitGone}）`);
     /* v1.8.2 判据：新版的两处结构性改动都在（设置页瘦身 + 技能紧凑小卡）。
        不用 VERSION 字符串 —— 那条只证明「文档换了」。 */
     check(m1.settingsCards === 2 && m1.skTiles === 13,
       `v1.8.2 新代码确实跑起来了（设置页 ${m1.settingsCards} 张卡 / 技能 ${m1.skTiles} 个小卡）`);
-    check(m1.pfFields === 4, `个人信息 4 组字段已渲染（实测 ${m1.pfFields} 组）`);
+    check(m1.dlItems === 5, `每日必做 5 条已渲染（实测 ${m1.dlItems} 条）`);
     /* 这里断言的是**要求**（页头必须留出状态栏空间），不是**变化** ——
        早先写成「必须比旧版更大」，一旦拿 v1.7.4 当旧版（它已经有这条留白）
        就会无辜报错。校验脚本自己也要避免这种「只对某个特定旧版成立」的判据。 */

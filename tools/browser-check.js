@@ -197,7 +197,7 @@ function check(ok, label, detail) {
 
   const S = await ev(`(() => {
     const gl = window.GL || {};
-    const pf = document.getElementById('profile-card');
+    const dl = document.getElementById('dailies-card');
     const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; };
     const rows = document.querySelectorAll('.ag-row');
     const groups = document.querySelectorAll('.ag');
@@ -206,7 +206,7 @@ function check(ok, label, detail) {
        那不是通过，是没测（橡皮图章）。 */
     const emojiProbe = (() => {
       try {
-        const nodes = document.querySelectorAll('.skill-emoji, .ag-glyph, .sg-glyph, .card-title, .tab, nav a');
+        const nodes = document.querySelectorAll('.skill-emoji, .ag-glyph, .sg-glyph, .card-title, .tab, nav a, .dl-emoji');
         const probe = document.querySelector('.skill-emoji') || document;
         const fam = getComputedStyle(probe).fontFamily || 'sans-serif';
         const cv = document.createElement('canvas');
@@ -244,16 +244,16 @@ function check(ok, label, detail) {
       hookCount: (gl.hooks || []).length,
       errors: __ERRS__,
       docH: document.documentElement.scrollHeight,
-      /* v1.8.1：中央立绘已移除，改看个人信息条是否真的渲染出来 */
-      profileRect: rect(pf),
-      pfFields: pf ? pf.querySelectorAll('.pf-field').length : -1,
-      pfRanges: pf ? pf.querySelectorAll('input[type="range"]').length : -1,
-      pfSelects: pf ? pf.querySelectorAll('select').length : -1,
-      pfReadouts: pf ? Array.from(pf.querySelectorAll('output')).map((o) => o.textContent).join('/') : null,
-      pfAvatar: (() => {
-        const a = (gl.state && gl.state.avatar) || {};
-        return [a.height, a.weight, a.muscle, a.hairStyle].join('|');
-      })(),
+      /* v1.10.0：个人信息条撤下，原位换成「每日必做」。这里先取静态快照 ——
+         「点一下到底会不会变」在断言区用真点击验证，不靠看源码。 */
+      dlRect: rect(dl),
+      dlItems: dl ? dl.querySelectorAll('.dl-item').length : -1,
+      dlChecks: dl ? dl.querySelectorAll('.dl-check').length : -1,
+      dlChecked: dl ? dl.querySelectorAll('.dl-check.on').length : -1,
+      dlTitles: dl ? Array.from(dl.querySelectorAll('.dl-t')).map((t) => t.textContent).join('|') : null,
+      dlAdd: !!document.getElementById('dl-add'),
+      dlStateLen: ((gl.state && gl.state.dailies) || []).length,
+      dlStateTitles: ((gl.state && gl.state.dailies) || []).map((d) => d.title).join('|'),
       /* 立绘必须真的没了：节点不在，且没有任何 GL.* 提供者去画它 */
       portraitGone: !document.getElementById('portrait-svg') && !document.getElementById('stage')
         && typeof gl.renderPortrait === 'undefined' && typeof gl.drawPortrait === 'undefined',
@@ -365,20 +365,100 @@ function check(ok, label, detail) {
   check(S.hasGL === true, 'GL 全局已建立');
   check(S.hookCount >= 6, 'GL.hooks 注册数 ≥ 6', `实际 ${S.hookCount}`);
   check(S.tabCount === 4, '主导航 4 个 tab', `实际 ${S.tabCount}`);
-  /* v1.8.1：中央立绘移除，原来的 portraitPaths / innerHTML 两条断言随之取消，
-     改看顶替它的「个人信息」条是否真的渲染出来 —— 同样是「hooks 有没有跑」的探针。 */
-  check(S.pfFields === 4, '个人信息：4 组字段（身高 / 体重 / 肌肉量 / 发型）', `实际 ${S.pfFields}`);
-  check(S.pfRanges === 3 && S.pfSelects === 1,
-    '个人信息：3 个滑块 + 1 个发型下拉',
-    `滑块 ${S.pfRanges} / 下拉 ${S.pfSelects}`);
-  check(S.profileRect && S.profileRect.w > 240 && S.profileRect.h > 40,
-    '个人信息有可见尺寸（不是 0 高的空壳）',
-    S.profileRect ? `${S.profileRect.w}×${S.profileRect.h}` : 'null');
-  check(S.pfReadouts === S.pfAvatar.split('|').slice(0, 3).join('/'),
-    '个人信息读数与 GL.state.avatar 一致（高度 ≤ 120px：它只是一条，不再占一整栏）',
-    `读数 ${S.pfReadouts} / 状态 ${S.pfAvatar} / 高度 ${S.profileRect ? S.profileRect.h : '?'}px`);
-  check(S.profileRect && S.profileRect.h <= 120,
-    '个人信息不占大块版面（条高 ≤ 120px）', S.profileRect ? `${S.profileRect.h}px` : 'null');
+  /* ---------- 每日必做（v1.10.0）----------
+     用户要求：把首页「个人信息」栏去掉，角色状态下面直接铺一排排每日必做；
+     每项可编辑、可自定义添加。所以这里既查「渲染出来了没有」，
+     也查「点下去真的会变」—— 后者只有真点才知道（静态全绿 ≠ 能点）。 */
+  check(S.dlItems === 5, '每日必做：默认渲染 5 条', `实际 ${S.dlItems}`);
+  check(S.dlItems === S.dlStateLen, '每日必做：DOM 条数与 GL.state.dailies 一致',
+    `DOM ${S.dlItems} / state ${S.dlStateLen}`);
+  check(S.dlChecks === S.dlItems, '每日必做：每条都有右侧勾选框', `勾选框 ${S.dlChecks} / 条目 ${S.dlItems}`);
+  check(S.dlAdd === true, '每日必做：有「＋」新增入口');
+  check(S.dlRect && S.dlRect.w > 240 && S.dlRect.h > 60,
+    '每日必做卡片有可见尺寸（不是 0 高的空壳）',
+    S.dlRect ? `${S.dlRect.w}×${S.dlRect.h}` : 'null');
+  check(!!S.dlTitles && S.dlTitles.indexOf('整理外脑1h') === 0,
+    '每日必做：第 1 条逐字照录用户原文', String(S.dlTitles).slice(0, 40));
+  check(S.dlTitles === S.dlStateTitles, '每日必做：DOM 标题与 state 完全一致');
+
+  const dl = await ev(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    const card = document.getElementById('dailies-card');
+    if (!card) return out;
+    const n = () => card.querySelectorAll('.dl-item').length;
+    const today = window.GL.todayKey(Date.now());
+    const doneN = () => (window.GL.state.dailies || []).filter((d) => d.doneOn === today).length;
+
+    out.before = n();
+    out.origNote = ((window.GL.state.dailies || [])[0] || {}).note;
+
+    /* ① 勾选：DOM 变 on + state 记下今天的日期 */
+    card.querySelector('.dl-check').click();
+    await sleep(280);
+    out.afterOn = !!card.querySelector('.dl-check.on');
+    out.stateDone = doneN();
+    out.doneOnValue = ((window.GL.state.dailies || [])[0] || {}).doneOn === today;
+
+    /* ② 再点一次取消 */
+    card.querySelector('.dl-check').click();
+    await sleep(280);
+    out.afterOff = doneN();
+
+    /* ③ 点文字 → 就地出现两个输入框（不是弹窗） */
+    card.querySelector('.dl-body').click();
+    await sleep(220);
+    out.inputs = card.querySelectorAll('.dl-edit input').length;
+    out.inline = card.querySelectorAll('.dl-edit').length;
+    out.modal = document.querySelectorAll('.smodal, #dailies-modal').length;
+
+    /* ④ 改小字 → 立刻落盘（不等退出编辑） */
+    const noteIn = card.querySelector('.dl-in-s');
+    if (noteIn) {
+      noteIn.value = '自检用的临时小字';
+      noteIn.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(120);
+    }
+    out.savedNote = ((window.GL.state.dailies || [])[0] || {}).note;
+
+    /* ⑤ 点「完成」收起编辑态 */
+    const ok = card.querySelector('[data-dl-ok]');
+    if (ok) ok.click();
+    await sleep(300);
+    out.afterOk = card.querySelectorAll('.dl-edit').length;
+
+    /* ⑥ 新增：多一条草稿并直接进入编辑态 */
+    document.getElementById('dl-add').click();
+    await sleep(300);
+    out.afterAdd = n();
+    out.addEditing = card.querySelectorAll('.dl-edit').length;
+
+    /* ⑦ 空标题点完成 → 草稿被丢弃，条数回到新增前（不留空壳） */
+    const ok2 = card.querySelector('[data-dl-ok]');
+    if (ok2) ok2.click();
+    await sleep(320);
+    out.afterEmpty = n();
+
+    /* 还原被改掉的小字，别把自检痕迹留在数据里 */
+    if ((window.GL.state.dailies || [])[0]) (window.GL.state.dailies[0]).note = out.origNote;
+    window.GL.save();
+    window.GL.changed();
+    return out;
+  })()`);
+  check(dl.before === 5, '每日必做：交互前有 5 条', `实际 ${dl.before}`);
+  check(dl.afterOn === true && dl.stateDone === 1 && dl.doneOnValue === true,
+    '每日必做：点一下真的打勾，且 state 记下「今天」',
+    `DOM ${dl.afterOn} / 完成数 ${dl.stateDone} / doneOn=今天 ${dl.doneOnValue}`);
+  check(dl.afterOff === 0, '每日必做：再点一次能取消', `实际完成数 ${dl.afterOff}`);
+  check(dl.inputs === 2 && dl.inline === 1, '每日必做：点文字就地展开两个输入框（标题 + 小字）',
+    `输入框 ${dl.inputs} / 编辑块 ${dl.inline}`);
+  check(dl.modal === 0, '每日必做：编辑是就地展开，不是浮层弹窗（用户明确排斥浮窗）', `浮层 ${dl.modal}`);
+  check(dl.savedNote === '自检用的临时小字', '每日必做：改小字立刻落盘', String(dl.savedNote));
+  check(dl.afterOk === 0, '每日必做：点「完成」能收起编辑态', `残留编辑块 ${dl.afterOk}`);
+  check(dl.afterAdd === 6 && dl.addEditing === 1, '每日必做：「＋」新增一条并直接进入编辑态',
+    `条数 ${dl.afterAdd} / 编辑块 ${dl.addEditing}`);
+  check(dl.afterEmpty === 5, '每日必做：空标题退出时草稿被丢弃（不留空壳条目）',
+    `实际条数 ${dl.afterEmpty}`);
   check(S.portraitGone === true, '中央立绘确已移除（#portrait-svg 不存在）', `实际 ${S.portraitGone}`);
   check(S.rvTotal > 0 && S.rvIn === S.rvTotal, '入场动画元素全部点亮（.rv.in == .rv）',
     `${S.rvIn}/${S.rvTotal} —— 不相等说明 reveal() 未跑完，页面会白屏`);
@@ -584,16 +664,49 @@ function check(ok, label, detail) {
     const p1 = path.join(ROOT, 'tools', 'browser-shot-full.png');
     fs.writeFileSync(p1, Buffer.from(s1.data, 'base64'));
     shotPaths.push(p1);
-    /* 个人信息条单独出图：v1.8.1 顶替中央立绘的那一条，要能一眼看清四组字段的排布 */
-    if (S.profileRect && S.profileRect.w > 100) {
-      const r = S.profileRect;
-      const s2 = await send('Page.captureScreenshot', {
+    /* 每日必做单独出图（v1.10.0）：两种状态各一张 ——
+       ① 常态（5 条、右侧空方框）；② 一条已打勾 + 另一条正在就地编辑。
+       断言能证明 state 与 DOM 变了，只有图能证明「看起来不挤、不像报错」。
+       拍完把勾与编辑态复原，别干扰后面的截图。 */
+    if (S.dlRect && S.dlRect.w > 100) {
+      const r0 = S.dlRect;
+      const sIdle = await send('Page.captureScreenshot', {
         format: 'png',
-        clip: { x: Math.max(0, r.x - 10), y: Math.max(0, r.y - 10), width: r.w + 20, height: r.h + 20, scale: 1.4 },
+        clip: { x: Math.max(0, r0.x - 10), y: Math.max(0, r0.y - 10), width: r0.w + 20, height: r0.h + 20, scale: 1.4 },
       });
-      const p2 = path.join(ROOT, 'tools', 'browser-shot-profile.png');
-      fs.writeFileSync(p2, Buffer.from(s2.data, 'base64'));
-      shotPaths.push(p2);
+      const pIdle = path.join(ROOT, 'tools', 'browser-shot-dailies.png');
+      fs.writeFileSync(pIdle, Buffer.from(sIdle.data, 'base64'));
+      shotPaths.push(pIdle);
+
+      const r1 = await ev(`(() => {
+        const c = document.getElementById('dailies-card');
+        if (!c) return null;
+        const checks = c.querySelectorAll('.dl-check');
+        if (checks[1]) checks[1].click();
+        const body = c.querySelector('.dl-body');
+        if (body) body.click();
+        const b = c.getBoundingClientRect();
+        return { x: b.x, y: b.y, w: b.width, h: b.height };
+      })()`);
+      await new Promise((r) => setTimeout(r, 520));
+      if (r1) {
+        const sEdit = await send('Page.captureScreenshot', {
+          format: 'png',
+          clip: { x: Math.max(0, r1.x - 10), y: Math.max(0, r1.y - 10), width: r1.w + 20, height: Math.max(r1.h + 20, 280), scale: 1.4 },
+        });
+        const pEdit = path.join(ROOT, 'tools', 'browser-shot-dailies-edit.png');
+        fs.writeFileSync(pEdit, Buffer.from(sEdit.data, 'base64'));
+        shotPaths.push(pEdit);
+      }
+      await ev(`(() => {
+        const c = document.getElementById('dailies-card');
+        if (!c) return;
+        const on = c.querySelector('.dl-check.on');
+        if (on) on.click();
+        const ok = c.querySelector('[data-dl-ok]');
+        if (ok) ok.click();
+      })()`);
+      await new Promise((r) => setTimeout(r, 320));
     }
     /* 逐 tab 截图：属性在「总览」、技能在「技能」——不同 tab 的渲染要分别看 */
     for (const tab of ['skills', 'life', 'settings']) {

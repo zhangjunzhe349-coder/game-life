@@ -591,6 +591,91 @@ b { font-weight: 700; }
 }
 .pf-field select { flex: none; min-width: 92px; }
 
+/* ============ 每日必做（v1.10.0） ============
+   顶替原「个人信息」条：用户要求撤掉个人信息，让角色状态下直接铺这一排排每日事项。
+   刻意**单列、无分栏、无统计** —— 每天只要一眼扫过 + 点右侧方框。
+   行高按 44px 触控目标设计；勾选框视觉 30px，热区靠 .dl-check 自身尺寸撑开。
+   不做「完成度进度条 / 连续天数」：用户明确说「经验啊、乱七八糟的先不用加」。 */
+.dailies {
+  padding: var(--s3) var(--s4) var(--s2);
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(21, 24, 34, 0.72), rgba(11, 13, 19, 0.55));
+  box-shadow: var(--sh-1);
+}
+.dl-head { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s1); }
+.dl-title {
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  letter-spacing: 0.24em; text-transform: uppercase; color: var(--muted);
+}
+.dl-title::before { content: "▚ "; color: var(--accent); letter-spacing: 0; }
+.dl-hint {
+  margin-left: auto; font-family: var(--font-mono);
+  font-size: var(--fs-2xs); color: var(--faint); font-variant-numeric: tabular-nums;
+}
+.dl-add {
+  flex: none; min-width: 34px; min-height: 30px; padding: 0 var(--s2);
+  font-size: var(--fs-md); line-height: 1;
+}
+
+.dl-list { display: flex; flex-direction: column; }
+.dl-item {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) 0; min-height: 54px;
+  border-top: 1px solid var(--line);
+}
+.dl-item:first-child { border-top: 0; }
+.dl-emoji { flex: none; width: 26px; text-align: center; font-size: 19px; line-height: 1.2; }
+
+.dl-body {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  cursor: text; border-radius: var(--r-sm);
+}
+.dl-body:focus-visible { outline: 1px solid var(--accent-line); outline-offset: 2px; }
+.dl-t {
+  font-size: var(--fs-base); color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dl-s {
+  font-size: var(--fs-sm); color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 完成态：整行退到背景里，但**不删** —— 明天还要用 */
+.dl-item.done .dl-t { color: var(--faint); text-decoration: line-through; text-decoration-thickness: 1px; }
+.dl-item.done .dl-emoji { opacity: 0.4; }
+.dl-item.done .dl-s { opacity: 0.55; }
+
+/* 右侧勾选框 —— 唯一改变状态的动作，尺寸给足，避免手机上点空 */
+.dl-check {
+  flex: none; width: 30px; height: 30px; padding: 0;
+  border: 2px solid var(--line-strong); border-radius: var(--r-sm);
+  background: transparent; cursor: pointer; position: relative;
+  transition: border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
+}
+.dl-check:hover { border-color: var(--muted); }
+.dl-check.on { border-color: var(--accent); background: var(--accent-soft); }
+.dl-check.on::after {
+  content: ""; position: absolute; left: 9px; top: 3px;
+  width: 7px; height: 14px;
+  border: solid var(--accent); border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+
+/* 编辑态：标题 / 小字两个输入框 + 删除·完成 */
+.dl-editing { align-items: flex-start; }
+.dl-edit { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.dl-edit input {
+  width: 100%; min-height: 34px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 0 var(--s2);
+  color: var(--text); font-family: var(--font-body); font-size: var(--fs-base);
+  transition: border-color var(--dur-fast) ease-out;
+}
+.dl-edit input:focus { border-color: var(--accent-line); outline: none; }
+.dl-edit .dl-in-s { font-size: var(--fs-sm); color: var(--muted); }
+.dl-ops { display: flex; gap: var(--s2); }
+.dl-empty { padding: var(--s5) 0; text-align: center; font-size: var(--fs-sm); color: var(--faint); }
+
 /* ============ 电子衣橱折叠块 ============
    v1.8.1 起整宽铺开。原先它挂在中间栏的立绘下方，只有约 300px ——
    41 张卡片的网格在那里挤成一列，所以改为独立一块，独占整行宽度。 */

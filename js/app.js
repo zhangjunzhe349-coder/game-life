@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.9.0';
+  const APP_VERSION = '1.10.0';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 顶部 HUD 读数 ----------
@@ -122,7 +122,7 @@
     <div class="card">
       <div class="card-head"><span class="card-title">ℹ️ 关于</span><span class="card-hint">LOCAL-FIRST · v${APP_VERSION}</span></div>
       <div class="dim">
-        Game Life v${APP_VERSION} · 个人信息 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 / 电子衣橱<br>
+        Game Life v${APP_VERSION} · 每日必做 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 / 电子衣橱<br>
         本地优先 · 无需登录 · 数据自主可控。后续可拓展：智能硬件自动同步、多端云同步、照片生成真实比例模型。
       </div>
       <div class="set-row">

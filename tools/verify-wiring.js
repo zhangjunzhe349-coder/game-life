@@ -31,7 +31,7 @@ const localScripts = scripts.filter((s) => !/^https?:/.test(s));
    ② 反过来 storage.js 更不能排在它后面，那会把 window.GL 整个重置掉。 */
 const EXPECT = ['js/storage.js', 'js/wardrobe-data.js', 'js/avatar.js',
   'js/wardrobe.js', 'js/physiology.js',
-  'js/attributes.js', 'js/skills.js', 'js/life.js', 'js/app.js'];
+  'js/attributes.js', 'js/skills.js', 'js/life.js', 'js/dailies.js', 'js/app.js'];
 if (JSON.stringify(localScripts) !== JSON.stringify(EXPECT)) {
   problems.push(`脚本顺序不符\n    实际：${localScripts.join(' → ')}\n    期望：${EXPECT.join(' → ')}`);
 } else {
@@ -80,8 +80,12 @@ if (scripts.some((s) => /three/i.test(s))) {
   ok.push('零外部脚本依赖（Three.js CDN 已移除）');
 }
 
-/* ---------- 2. 宿主节点存在性 ---------- */
-const NEEDED = ['profile-card', 'hud-lv', 'hud-readouts', 'wing-attrs', 'wing-body',
+/* ---------- 2. 宿主节点存在性 ----------
+   v1.10.0 起 #profile-card 撤下，原位置换成 #dailies-card（每日必做）。
+   js/avatar.js 仍留在清单里：它的 render() 有 `if (!el) return` 兜底，
+   且 GL.state.avatar 的身高/体重/肌肉量数据仍被衣橱与备份消费 —— 只是编辑入口没了。
+   要恢复个人信息条，把节点加回来即可，不用改 avatar.js。 */
+const NEEDED = ['dailies-card', 'hud-lv', 'hud-readouts', 'wing-attrs', 'wing-body',
   'tabs', 'ctrl-toggle', 'avatar-panel', 'wardrobe-ctrl',
   'panel-hud', 'panel-skills', 'panel-life', 'panel-settings', 'toast-box', 'main'];
 for (const id of NEEDED) {
@@ -94,7 +98,7 @@ if (NEEDED.every((id) => new RegExp(`id="${id}"`).test(html))) {
 /* ---------- 3. 中央立绘已移除：这些宿主节点不得复活（v1.8.1） ----------
    用户拍板「角色立绘效果不好，去掉这个模块，只保留个人信息」，于是
    js/portrait.js 与 #portrait-svg / #stage / #stage-base / #avatar-ctrl 整条链路删除，
-   个人信息改由 #profile-card 承载。
+   个人信息改由 #profile-card 承载（v1.10.0 起该条也撤下，换成 #dailies-card）。
    留这条反向断言，是因为最容易犯的回归不是「删漏了」，而是**改别处时顺手把旧节点加回来**
    —— 那会让个人信息与立绘同时存在，而没有任何校验会因此报错。 */
 const GONE = ['portrait-svg', 'stage', 'stage-base', 'avatar-ctrl', 'ctrl-tabs'];
@@ -102,7 +106,8 @@ const revived = GONE.filter((id) => new RegExp(`id="${id}"`).test(html));
 if (revived.length) {
   problems.push(
     `index.html 里又出现了 v1.8.1 已移除的宿主节点：#${revived.join('、#')} —— ` +
-    '中央立绘已废除，个人信息由 #profile-card 承载；立绘相关文件也已不在仓里，加了节点也没人渲染',
+    '中央立绘已废除，那个位置后来由 #profile-card（个人信息条）承载、v1.10.0 起换成 #dailies-card；' +
+    '立绘相关文件也已不在仓里，加了节点也没人渲染',
   );
 } else {
   ok.push(`已移除的立绘宿主节点确认不复存在（${GONE.length} 个：${GONE.join(', ')}）`);
@@ -264,7 +269,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 19;   // v1.9.0：设置页新增「检查更新」按钮（app.js 加 GL.checkUpdate、css 加 .upd-state）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开；每轮都动了 css 或 js，资源有变就必须抬到同值
+const MIN_SW_VER = 20;   // v1.10.0：首页「每日必做」顶替「个人信息」（新增 js/dailies.js、index.html 换宿主、css 大改）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开 → v19 检查更新；每轮都动了 css 或 js，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

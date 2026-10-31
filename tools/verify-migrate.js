@@ -326,6 +326,61 @@ const v3State = {
     'emoji：重复 load 幂等（不会反复改写）');
 }
 
+/* ============ 每日必做（v1.10.0） ============
+   三条路径都必须守，否则会以「看起来正常」的样子出错：
+     ① 全新装 → 默认 5 项（用户截图里那几件事）
+     ② 老数据里没有 dailies 字段 → load 时补上（merge 的默认值路径）
+     ③ 用户主动删光（[]）→ **必须保持空**，不能被「补默认」又长回来
+   ③ 是最容易写错的：把 seed 写成「length === 0 就补」，
+   用户删完一刷新全部复活的体验极差。 */
+function checkDailies() {
+  {
+    const b = boot();
+    b.GL.load();
+    const d = b.GL.state.dailies;
+    check(Array.isArray(d) && d.length === 5, '每日必做：全新装默认 5 项',
+      '实际 ' + (Array.isArray(d) ? d.length : typeof d));
+    check(d[0] && d[0].title === '整理外脑1h' && d[0].note === '这是进化的必备条件',
+      '每日必做：默认项逐字照录用户原文（第 1 项）',
+      d[0] ? d[0].title + ' / ' + d[0].note : '（无）');
+    check(d.every((x) => x.id && x.emoji && !x.doneOn),
+      '每日必做：每项都有 id / emoji，且初始为未完成');
+    check(d[2].note === '', '每日必做：截图里被省略号截断的小字不瞎猜（第 3 项留空）',
+      '实际「' + d[2].note + '」');
+  }
+
+  {
+    const b = boot();
+    b.store['gamelife_state_v1'] = JSON.stringify(v1State);   // v1 数据里根本没有 dailies
+    b.GL.load();
+    const d = b.GL.state.dailies;
+    check(Array.isArray(d) && d.length === 5, '每日必做：老数据升级后补上默认 5 项',
+      '实际 ' + (Array.isArray(d) ? d.length : typeof d));
+  }
+
+  {
+    const b = boot();
+    b.GL.load();
+    b.GL.state.dailies = [];
+    b.GL.save();
+    b.GL.load();
+    check(Array.isArray(b.GL.state.dailies) && b.GL.state.dailies.length === 0,
+      '每日必做：用户主动删光后不会被默认值长回来',
+      '实际 ' + (b.GL.state.dailies || []).length);
+  }
+
+  {
+    const b = boot();
+    b.GL.load();
+    b.GL.state.dailies[0].doneOn = b.GL.todayKey(Date.now());
+    b.GL.save();
+    b.GL.load();
+    check(b.GL.state.dailies[0].doneOn === b.GL.todayKey(Date.now()),
+      '每日必做：完成状态按日期存（不存布尔值，跨日自然失效）');
+  }
+}
+checkDailies();
+
 /* ============ 输出 ============ */
 console.log('=== 数据迁移校验 ===\n');
 ok.forEach((s) => console.log('  ✓ ' + s));
