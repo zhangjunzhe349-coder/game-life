@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.10.0';
+  const APP_VERSION = '1.10.1';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 顶部 HUD 读数 ----------
@@ -137,9 +137,9 @@
     const note = el.querySelector('#upd-note');
     if (note) {
       note.innerHTML = GL.isNativeApp()
-        ? '安卓安装包（APK）里的网页资源是<b>打包进包体</b>的，应用内换不了包体本身 —— '
-          + '这里只做版本核对；若想换版，请到下载页重新安装。'
-        : '点一下会向服务器核对版本：有新版本立即下载并自动刷新，<b>不用退出 App 重开</b>。<br>'
+        ? '安卓安装包（APK）的网页资源<b>打包在包体里</b>，应用内换不了包体本身 —— '
+          + '但这里会去<b>线上核对版本</b>：有新版本就给出「下载安装」按钮，装上即可覆盖（数据不丢）。'
+        : '点一下会同时核对<b>线上版本清单</b>与离线缓存：有新版本立即下载并自动刷新，<b>不用退出 App 重开</b>。<br>'
           + '平时每次打开 App 也会自动检查一次；从主屏图标唤起时若复用了后台那张页面，就靠这个按钮补一下。';
     }
   }
@@ -250,7 +250,159 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  /* ---------- 检查更新（v1.9.0） ----------
+  /* ---------- 权威版本源（v1.10.1） ----------
+     为什么必须有这一层：SW 的 update() 只回答「sw.js 这个文件有没有变」，
+     它**回答不了**「线上现在是什么版本」。而原生 APK 的网页资源是打包进包体的，
+     它读到的 sw.js 永远是包内那份 —— reg.update() 必然得出「没变化」，
+     于是老按钮在 APK 里**永远显示「已是最新」**（用户 2026-11-01 报的正是这个）。
+
+     所以判据换成两条腿：
+       ① 权威清单：线上到底是多少版（与 SW 无关，跨域也可读）；
+       ② SW 更新：网页端真正换资源的那条路。
+     两者矛盾时（清单说新、SW 说没新）信清单，走 hardReload 清缓存。
+
+     全部免费：GitHub Pages / Releases API 都返回 `Access-Control-Allow-Origin: *`，
+     不需要任何付费服务，也不需要自建服务器。 */
+
+  const UPD_FEED_SAME = 'version.json';
+  const UPD_FEED_REMOTE = [
+    'https://zhangjunzhe349-coder.github.io/game-life/version.json',
+    'https://api.github.com/repos/zhangjunzhe349-coder/game-life/releases/tags/android-latest',
+  ];
+  const APK_URL = 'https://github.com/zhangjunzhe349-coder/game-life/releases/download/android-latest/GameLife.apk';
+
+  /* 语义化版本比较：必须按数字段比。字符串比较里 '1.10.1' < '1.9.0' 是 true，
+     这个坑会让「发了新版却说没更新」再犯一次。 */
+  function cmpVer(a, b) {
+    const pa = String(a || '0').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b || '0').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = pa[i] || 0;
+      const y = pb[i] || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+  /* 暴露出去只为让校验脚本能直接钉住「按数字段比」这条 —— 界面不消费它。 */
+  GL.cmpVer = cmpVer;
+
+  /* 两种响应归一：自家 version.json 与 GitHub Releases API 结构不同，这里抹平。 */
+  function pickVer(d) {
+    if (!d) return null;
+    if (typeof d.version === 'string' && /^\d+\.\d+\.\d+/.test(d.version.trim())) {
+      return { version: d.version.trim(), apkUrl: (d.apk && d.apk.url) || APK_URL };
+    }
+    /* Releases API：title 形如「Game Life 安卓版 v1.10.1」 */
+    const m = /v?(\d+\.\d+\.\d+)/.exec(String(d.name || '') + ' ' + String(d.body || ''));
+    if (!m) return null;
+    const asset = (d.assets || []).find((a) => /\.apk$/i.test(a.name || ''));
+    return { version: m[1], apkUrl: (asset && asset.browser_download_url) || APK_URL };
+  }
+
+  function fetchJson(url, ms) {
+    return new Promise((resolve, reject) => {
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = setTimeout(() => {
+        if (ctl) { try { ctl.abort(); } catch (e) { /* ignore */ } }
+        reject(new Error('timeout'));
+      }, ms || 6000);
+      fetch(url, {
+        cache: 'no-store',
+        signal: ctl ? ctl.signal : undefined,
+        headers: { Accept: 'application/json' },
+      }).then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then((d) => { clearTimeout(timer); resolve(d); })
+        .catch((e) => { clearTimeout(timer); reject(e); });
+    });
+  }
+
+  /* 竞速取第一个可用结果：单个源慢/被墙时不让用户干等。
+     不用 Promise.any —— Android 7/8 的老 WebView 未必有。 */
+  function firstOk(tasks, ms) {
+    return new Promise((resolve) => {
+      let left = tasks.length;
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) { done = true; resolve(null); }
+      }, ms);
+      if (!left) { clearTimeout(timer); resolve(null); }
+      tasks.forEach((run) => {
+        Promise.resolve().then(run).then((v) => {
+          if (!done && v) { done = true; clearTimeout(timer); resolve(v); }
+        }).catch(() => { /* 单源失败不影响其他源 */ })
+          .then(() => {
+            left -= 1;
+            if (left <= 0 && !done) { done = true; clearTimeout(timer); resolve(null); }
+          });
+      });
+    });
+  }
+
+  async function fetchLatest() {
+    const stamp = () => Date.now();
+    /* 原生包：只信 **GitHub Releases** —— 它是唯一能反映「包体真的出好了没有」的源。
+       自家 version.json 是跟着网页一起发布的，可能比 APK 早 1~2 分钟落地；
+       拿它判断，用户会下载到一个还是旧版的包，装完再检查又是一样的话，白跑一趟。
+       而且原生包**绝不能**读同源 version.json —— 那份是打包时的旧快照，
+       读它就会永远得出「已是最新」，正是这次要修的假象。 */
+    if (GL.isNativeApp()) {
+      const gh = await firstOk([
+        () => fetchJson(UPD_FEED_REMOTE[1] + '?t=' + stamp(), 6000).then(pickVer),
+      ], 6500);
+      if (gh) return gh;
+      /* API 不通时的兜底：Pages 上的清单（比内置托管多 CORS 头，能跨域读） */
+      return firstOk([
+        () => fetchJson(UPD_FEED_REMOTE[0] + '?t=' + stamp(), 6000).then(pickVer),
+      ], 6500);
+    }
+    /* 网页/PWA：同源清单最快，也与本次部署天然同步 */
+    const tasks = [UPD_FEED_SAME].concat(UPD_FEED_REMOTE).map(
+      (u) => () => fetchJson(u + (u.indexOf('?') < 0 ? '?t=' : '&t=') + stamp(), 6000).then(pickVer));
+    return firstOk(tasks, 6500);
+  }
+
+  /* 硬重载：连 Cache Storage 一起清。
+     只在「清单说新版、SW 却说没有」这种自相矛盾时用 ——
+     正常换版走 skipWaiting + controllerchange，不动用户的离线缓存。 */
+  async function hardReload() {
+    try {
+      if (window.caches && caches.keys) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) await reg.unregister();
+      }
+    } catch (e) { /* 清不掉也照刷：至少 HTML 会重新走网络 */ }
+    reloadForUpdate();
+  }
+
+  /* 原生包专用：把「去下载」变成一个真按钮。
+     Capacitor 的 WebView 对非 app 源的跳转会交给系统浏览器（allowNavigation 默认为空），
+     所以 location.href 比 target=_blank 可靠 —— WebView 默认不开多窗口。 */
+  function showApkDownload(url, ver) {
+    const btn = document.getElementById('btn-check-update');
+    if (!btn || !btn.parentNode) return;
+    let a = document.getElementById('btn-download-apk');
+    if (!a) {
+      a = document.createElement('a');
+      a.id = 'btn-download-apk';
+      a.className = 'btn primary';
+      a.rel = 'noopener';
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        location.href = url;
+      });
+      btn.parentNode.insertBefore(a, btn.nextSibling);
+    }
+    a.href = url;
+    a.textContent = `⬇ 下载安装 v${ver}`;
+  }
+
+  /* ---------- 检查更新（v1.9.0 起，v1.10.1 换成双判据） ----------
      为什么需要这个按钮：SW 的自动更新检查**只在页面加载时发生**（见 start() 里的
      register + reg.update）。手机上把 PWA 添加到主屏之后，从主屏图标唤起往往复用
      已在后台的那张页面 —— 注册流程不会再跑一次，自动检查也就不会发生，用户看到的
@@ -293,15 +445,40 @@
     };
     const finish = (r) => { if (btn) btn.disabled = false; return r; };
 
-    /* file:// 打开、或原生 WebView 不给 SW —— 如实说，不假装能更新 */
-    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.getRegistration) {
-      say(GL.isNativeApp() ? '原生包：请到下载页获取新版' : '当前环境不支持自动更新（需用 https 打开）', 'warn');
-      return 'unsupported';
-    }
     if (btn) btn.disabled = true;
     if (!navigator.onLine) { say('当前离线，无法检查更新', 'warn'); return finish('offline'); }
 
     say('正在检查…', 'busy');
+
+    /* 第一判据：线上到底是多少版 —— 与 SW 无关。
+       老实现只有 SW 一条判据，而 SW 在原生 APK 里必然说「没变化」，
+       于是按钮永远是安慰剂。这一步就是那次「假绿」的修复。 */
+    const latest = await fetchLatest();
+    const newer = !!(latest && cmpVer(latest.version, APP_VERSION) > 0);
+
+    /* ---- 原生 APK ----
+       网页资源打包在包体里，应用内换不了包体本身，SW 这条路在 APK 里是空转的。
+       能做的是「查版本 + 一键去下载」，剩下两步系统安装 —— 免费，但绕不过安卓的签名机制。 */
+    if (GL.isNativeApp()) {
+      if (!latest) { say('连不上版本服务器，请检查网络后重试', 'err'); return finish('error'); }
+      if (newer) {
+        say(`发现新版 v${latest.version} · 当前 v${APP_VERSION}`, 'warn');
+        showApkDownload(latest.apkUrl || APK_URL, latest.version);
+        GL.toast(`发现新版本 v${latest.version}`, 'ok');
+        return finish('update-available');
+      }
+      say(`已是最新（v${APP_VERSION}）`, 'ok');
+      GL.toast('已是最新版本 v' + APP_VERSION, 'ok');
+      return finish('latest');
+    }
+
+    /* 没有 SW 的网页环境（file:// 或 http 非 localhost）：清单仍能核对版本 */
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.getRegistration) {
+      if (!latest) { say('当前环境不支持自动更新（需用 https 打开）', 'warn'); return finish('unsupported'); }
+      say(newer ? `线上已有 v${latest.version}（当前 v${APP_VERSION}）` : `已是最新（v${APP_VERSION}）`,
+        newer ? 'warn' : 'ok');
+      return finish(newer ? 'update-available' : 'latest');
+    }
 
     let reg = null;
     try { reg = await navigator.serviceWorker.getRegistration(); } catch (e) { reg = null; }
@@ -315,8 +492,14 @@
     const before = reg.active || null;
 
     /* 还没有现役 SW = 首次安装，不是「有新版」——
-       这时若往下走，下面「有新 worker 进来」的判据会把首次安装误报成「发现新版本」。 */
+       这时若往下走，下面「有新 worker 进来」的判据会把首次安装误报成「发现新版本」。
+       但清单若说线上更新，说明手里这份页面本身就旧 → 硬刷。 */
     if (!before) {
+      if (newer) {
+        say(`线上已是 v${latest.version}，正在刷新…`, 'busy');
+        hardReload();
+        return 'hard-reload';
+      }
       say('正在完成首次安装…', 'busy');
       await sleep(1500);
       say(`已是最新（v${APP_VERSION}）`, 'ok');
@@ -345,8 +528,17 @@
     await Promise.race([doing, sleep(UPDATE_TIMEOUT)]);
     try { reg.removeEventListener('updatefound', onFound); } catch (e) { /* ignore */ }
 
-    if (!settled) { say('检查超时，请检查网络后重试', 'warn'); return finish('timeout'); }
-    if (failed) { say('检查失败：连不上更新服务', 'err'); return finish('error'); }
+    /* SW 这条路走不通，但清单说线上更新 → 说明是缓存/SW 卡住了，硬刷一次比报错有用 */
+    if (failed || !settled) {
+      if (newer) {
+        say(`线上已是 v${latest.version}，正在强制刷新…`, 'busy');
+        GL.toast('正在强制刷新到 v' + latest.version, 'ok');
+        hardReload();
+        return 'hard-reload';
+      }
+      say(failed ? '检查失败：连不上更新服务' : '检查超时，请检查网络后重试', failed ? 'err' : 'warn');
+      return finish(failed ? 'error' : 'timeout');
+    }
 
     /* 个别浏览器 updatefound 与 installing 的赋值差一拍，让一拍再判 */
     if (!newWorkerIn(reg, before)) await sleep(400);
@@ -373,6 +565,16 @@
         }
       }
       return 'updating';
+    }
+
+    /* 最后一道：SW 说没新版，但清单明确说线上更新 —— 二者矛盾时信清单。
+       这种情况真实存在（HTTP 缓存钉住 sw.js、僵尸 SW、代理返回旧字节），
+       老实现会在这里报「已是最新」，就是用户看到的那个谎。 */
+    if (newer) {
+      say(`线上已是 v${latest.version}，正在强制刷新…`, 'busy');
+      GL.toast('正在强制刷新到 v' + latest.version, 'ok');
+      hardReload();
+      return 'hard-reload';
     }
 
     say(`已是最新（v${APP_VERSION}）`, 'ok');

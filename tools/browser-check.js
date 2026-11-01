@@ -56,6 +56,21 @@ const closeSrv = () => { try { if (srv.listening) srv.close(); } catch (e) {} };
 const srv = http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split('?')[0]);
   if (p === '/') p = '/index.html';
+
+  /* version.json 由 build-dist 生成，源码模式下仓库根没有它。
+     这里按 app.js 的 APP_VERSION 现造一份（语义与线上一致：「本站当前版本」）。
+     否则源码校验会去问远端，结论受外网与线上发布状态影响 —— 校验就不再确定。 */
+  if (p === '/version.json' && !fs.existsSync(path.join(SERVE, 'version.json'))) {
+    const appSrc = fs.readFileSync(path.join(ROOT, 'js', 'app.js'), 'utf8');
+    const v = (/APP_VERSION = '([^']+)'/.exec(appSrc) || [])[1] || '0.0.0';
+    res.writeHead(200, {
+      'Content-Type': MIME['.json'],
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    });
+    res.end(JSON.stringify({ version: v, apk: { version: v, url: '' } }));
+    return;
+  }
+
   const fp = path.join(SERVE, p);
   if (!fp.startsWith(SERVE)) { res.writeHead(403).end(); return; }
   fs.readFile(fp, (err, buf) => {
@@ -530,6 +545,16 @@ function check(ok, label, detail) {
   check(upd.before !== upd.after, '检查更新：状态行真的被刷新（不是点了没反应）',
     `${upd.before} → ${upd.after}`);
   check(upd.reenabled === true, '检查更新：检查结束后按钮恢复可点（不会一次点死）');
+
+  /* 版本比较必须按数字段：字符串比较里 '1.10.1' < '1.9.0' 是 true，
+     那会让「发了新版却说没更新」再犯一次（v1.10.1 的根因之一）。 */
+  const verCmp = await ev(`(() => {
+    if (!window.GL || typeof GL.cmpVer !== 'function') return null;
+    return [GL.cmpVer('1.10.1', '1.9.0'), GL.cmpVer('1.9.0', '1.10.1'),
+      GL.cmpVer('1.10.1', '1.10.1'), GL.cmpVer('1.10.1', '1.10.0')];
+  })()`);
+  check(Array.isArray(verCmp) && verCmp[0] === 1 && verCmp[1] === -1 && verCmp[2] === 0 && verCmp[3] === 1,
+    '版本比较按数字段（1.10.1 > 1.9.0，不是字符串比较）', JSON.stringify(verCmp));
 
   /* ---------- 电子衣橱（v1.8.0 照片版 / v1.8.1 去立绘）----------
      静态检查全都看不出「页面能看、点不动」，所以这一段**必须真点一遍**：

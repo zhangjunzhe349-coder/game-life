@@ -69,8 +69,13 @@
       js/storage.js 的 defaults() 多了 state.dailies（默认 5 项）。
    ② css/style.css 与 index.html 都改了 —— 不抬版本号，手机主屏上的旧缓存会继续供
       「个人信息条」那一版，看起来像改动没发出去。
+   v21 的改动（v1.10.1 · 检查更新改成「版本清单 + SW」双判据）：
+   ① js/app.js 变了（新增 cmpVer / fetchLatest / hardReload / showApkDownload，
+      checkUpdate 重构）—— 不抬版本号，已装过 v20 的浏览器会继续跑旧按钮。
+   ② fetch 里对 version.json **直接放行**：它是「线上到底多少版」的权威清单，
+      一旦被缓存优先供下去，就会一直读到旧版本号 —— 那正是要修的病。
    ============================================================ */
-const CACHE = 'gamelife-v20';
+const CACHE = 'gamelife-v21';
 
 const ASSETS = [
   './',
@@ -153,6 +158,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   // 只接管同源资源；跨域请求（正常情况下已不存在）交给浏览器原生处理
   if (url.origin !== location.origin) return;
+
+  /* 版本清单必须永远走网络：它是「检查更新」的权威依据，
+     被缓存优先供一份旧的，就等于让按钮继续骗人（v1.10.1 修的就是这个）。 */
+  if (url.pathname.endsWith('/version.json')) return;
 
   e.respondWith(
     caches.match(req).then((hit) => {

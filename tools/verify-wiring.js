@@ -269,7 +269,7 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 20;   // v1.10.0：首页「每日必做」顶替「个人信息」（新增 js/dailies.js、index.html 换宿主、css 大改）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开 → v19 检查更新；每轮都动了 css 或 js，资源有变就必须抬到同值
+const MIN_SW_VER = 21;   // v1.10.1：检查更新改成「版本清单 + SW」双判据（app.js 大改、sw.js 放行 version.json）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开 → v19 检查更新 → v20 每日必做；每轮都动了 css 或 js，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 
@@ -384,10 +384,56 @@ if (/navigator\.onLine|onLine/.test(app)) ok.push('检查更新区分「离线 /
 else problems.push('app.js 没区分离线 —— 断网时会把「查不到」说成「已是最新」，比不检查更糟');
 
 /* 原生 APK 的网页资源是打包进包体的，应用内换不了 —— 文案必须分开写，不假装能自更新 */
-if (/isNativeApp\(\)[\s\S]{0,400}?打包进包体|打包进包体/.test(app)) {
-  ok.push('检查更新对原生包如实说明（APK 包体内的资源应用内换不了，只做版本核对）');
+if (/打包在包体里|打包进包体/.test(app)) {
+  ok.push('检查更新对原生包如实说明（APK 包体内的资源应用内换不了，改为版本核对 + 下载）');
 } else {
   problems.push('app.js 未对原生包说明差异 —— 会对 APK 用户谎称能自动更新，而包体是打包进去的');
+}
+
+/* ---------- 6i. 版本清单：不允许只靠 SW 判据（v1.10.1）----------
+   为什么单独立一条：只靠 SW 的话，原生 APK 里**必然**是「已是最新」——
+   它读到的 sw.js 永远是包内那份，reg.update() 永远说没变化。
+   所以必须有独立于 SW 的权威版本源；且原生包不许读同源那份（那是打包时的旧快照）。 */
+const hasCmpVer = /function cmpVer\(/.test(app);
+const hasFeed = /UPD_FEED_REMOTE\s*=\s*\[/.test(app) && /version\.json/.test(app);
+const nativeUsesRemote = /if\s*\(GL\.isNativeApp\(\)\)\s*\{[\s\S]{0,500}?UPD_FEED_REMOTE/.test(app);
+const hasHardReload = /async function hardReload\(/.test(app) && /caches\.delete\(/.test(app);
+const hasApkBtn = /function showApkDownload\(/.test(app) && /btn-download-apk/.test(app);
+
+if (hasCmpVer && hasFeed) {
+  ok.push('「检查更新」有独立于 SW 的版本清单（cmpVer 按数字段比，不靠字符串比较）');
+} else {
+  problems.push('「检查更新」缺少版本清单判据（cmpVer ' + (hasCmpVer ? '有' : '缺')
+    + ' / UPD_FEED_REMOTE ' + (hasFeed ? '有' : '缺') + '）—— 只靠 SW，原生包里永远是「已是最新」');
+}
+if (nativeUsesRemote) {
+  ok.push('原生包只读远端清单（不会被包内的旧 version.json 骗成「已是最新」）');
+} else {
+  problems.push('原生包没有走远端版本源 —— 包内的 version.json/sw.js 都是旧快照，必然假绿');
+}
+if (hasHardReload) {
+  ok.push('清单说新版而 SW 说没有时会清缓存硬刷（不再把矛盾报成「已是最新」）');
+} else {
+  problems.push('缺少 hardReload —— 清单说新版、SW 说没有时会老老实实报「已是最新」，又是一个谎');
+}
+if (hasApkBtn) {
+  ok.push('原生包发现新版时给「下载安装」按钮（APK 只能在系统里覆盖安装）');
+} else {
+  problems.push('原生包发现新版却没有下载入口 —— 用户只能自己找，等于白检查');
+}
+
+/* version.json 必须由构建脚本产出，且版本号取自 app.js（两处手改必定漏一处） */
+const buildSrc = fs.readFileSync(path.join(ROOT, 'tools', 'build-dist.js'), 'utf8');
+if (/version\.json/.test(buildSrc) && /APP_VERSION/.test(buildSrc)) {
+  ok.push('构建脚本按 app.js 的 APP_VERSION 生成 version.json');
+} else {
+  problems.push('build-dist.js 不生成 version.json —— 线上没有版本清单，检查更新会退化成只看 SW');
+}
+/* 缓存优先会一直供旧版本号，sw.js 必须放行这个路径 */
+if (/pathname\.endsWith\('\/version\.json'\)/.test(sw)) {
+  ok.push('sw.js 对 version.json 直接放行（不被缓存优先供旧版本号）');
+} else {
+  problems.push('sw.js 没有放行 version.json —— 缓存优先会让检查更新一直读到旧版本号');
 }
 
 /* sw.js 侧的兜底通道：新 SW 卡在 waiting 时，页面发消息催它上位 */

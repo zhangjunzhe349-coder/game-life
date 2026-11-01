@@ -50,11 +50,18 @@ const files = rawAssets.map((u) => (u === './' ? 'index.html' : u.replace(/^\.\/
    最后由 headless 校验报 "bad HTTP response code (404) fetching the script" 才暴露。
    => 凡是被 JS 字符串引用的资源，一律纳入产物清单。 */
 const JS_REF_RE = /['"]([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:png|jpe?g|svg|webp|woff2?|json|webmanifest|js|css|mp3|wav|ogg))['"]/g;
+/* version.json 是**本脚本稍后生成**的产物，不是源码资源。
+   app.js 里确实有 'version.json' 这个字面量，扫描会把它收进清单，
+   但那会儿仓库根还没有这个文件 → 会在「仓库里就缺这些文件」里误报。 */
+const JS_REF_SKIP = new Set(['version.json']);
 const jsRefs = new Set();
 for (const rel of [...files]) {
   if (!rel.startsWith('js/') || !fs.existsSync(path.join(ROOT, rel))) continue;
   const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  for (const m of src.matchAll(JS_REF_RE)) jsRefs.add(m[1].replace(/^\.\//, ''));
+  for (const m of src.matchAll(JS_REF_RE)) {
+    const hit = m[1].replace(/^\.\//, '');
+    if (!JS_REF_SKIP.has(hit)) jsRefs.add(hit);
+  }
 }
 for (const rel of jsRefs) if (!files.includes(rel)) files.push(rel);
 
@@ -123,6 +130,9 @@ fs.writeFileSync(path.join(DIST, '_headers'), [
   '/index.html',
   '  Cache-Control: no-cache',
   '',
+  '/version.json',
+  '  Cache-Control: no-cache',
+  '',
   '/*',
   '  X-Content-Type-Options: nosniff',
   ''
@@ -130,6 +140,28 @@ fs.writeFileSync(path.join(DIST, '_headers'), [
 
 // _redirects：所有未知路径回落 index.html（本项目是单页，多了也不会错）
 fs.writeFileSync(path.join(DIST, '_redirects'), '/*  /index.html  404\n');
+
+/* ---------- 版本清单 version.json ----------
+   给 App 内「检查更新」一个**独立于 Service Worker** 的权威答案。
+   SW 只能判断「sw.js 这个文件有没有变」，判断不了「线上现在是多少版」；
+   而原生 APK 读到的 sw.js 永远是包内那份 —— 只靠 SW，APK 里永远显示「已是最新」。
+
+   它**不进 sw.js 的 ASSETS**（不能被缓存优先供应旧值），
+   sw.js 的 fetch 里对它的请求直接放行到网络。
+   版本号从 js/app.js 的 APP_VERSION 现读，避免两处手改漏改。 */
+const appSrc = fs.readFileSync(path.join(ROOT, 'js/app.js'), 'utf8');
+const verHit = /APP_VERSION = '([^']+)'/.exec(appSrc);
+if (!verHit) {
+  console.error('❌ js/app.js 里找不到 APP_VERSION，无法生成 version.json');
+  process.exit(1);
+}
+const APP_VER = verHit[1];
+const APK_DL = 'https://github.com/zhangjunzhe349-coder/game-life/releases/download/android-latest/GameLife.apk';
+fs.writeFileSync(path.join(DIST, 'version.json'), JSON.stringify({
+  version: APP_VER,
+  releasedAt: new Date().toISOString().slice(0, 10),
+  apk: { version: APP_VER, url: APK_DL },
+}, null, 2) + '\n');
 
 /* ---------- 4. 自检：dist 必须自给自足 ---------- */
 const problems = [];
@@ -182,6 +214,25 @@ if (!fs.existsSync(path.join(DIST, 'sw.js'))) {
   if (dv !== rv) problems.push(`dist/sw.js 缓存版本 v${dv} 与仓库 v${rv} 不一致（产物是旧的）`);
 }
 
+// 4f. 版本清单：必须存在，且版本号与源码一致
+//     它是「检查更新」唯一的权威源；缺了它，原生包会永远显示「已是最新」。
+const vjPath = path.join(DIST, 'version.json');
+if (!fs.existsSync(vjPath)) {
+  problems.push('dist 缺少 version.json —— App 内「检查更新」会退化成只看 SW，原生包永远显示已是最新');
+} else {
+  let vj = null;
+  try { vj = JSON.parse(fs.readFileSync(vjPath, 'utf8')); }
+  catch (e) { problems.push('dist/version.json 不是合法 JSON'); }
+  if (vj && vj.version !== APP_VER) {
+    problems.push(`dist/version.json 的版本 ${vj.version} 与 app.js 的 ${APP_VER} 不一致`);
+  }
+}
+
+// 4g. sw.js 必须放行 version.json（缓存优先会一直供旧版本号，按钮又会骗人）
+if (!/pathname\.endsWith\('\/version\.json'\)/.test(sw)) {
+  problems.push('sw.js 没有放行 version.json —— 它会被缓存优先供旧值，「检查更新」读到的是过期版本号');
+}
+
 /* ---------- 5. 报告 ---------- */
 const kb = (n) => (n / 1024).toFixed(1) + ' KB';
 console.log('  dist/ 文件清单');
@@ -189,7 +240,7 @@ for (const rel of uniq) {
   const p = path.join(DIST, rel);
   if (fs.existsSync(p)) console.log(`    ${kb(fs.statSync(p).size).padStart(9)}  ${rel}`);
 }
-for (const f of ['.nojekyll', '_headers', '_redirects']) {
+for (const f of ['.nojekyll', '_headers', '_redirects', 'version.json']) {
   console.log(`    ${String((fs.statSync(path.join(DIST, f)).size) + ' B').padStart(9)}  ${f}`);
 }
 console.log(`\n  合计 ${uniq.length} 个运行时文件，${kb(bytes)}`);
