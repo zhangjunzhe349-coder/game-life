@@ -157,11 +157,18 @@ if (!verHit) {
 }
 const APP_VER = verHit[1];
 const APK_DL = 'https://github.com/zhangjunzhe349-coder/game-life/releases/download/android-latest/GameLife.apk';
-fs.writeFileSync(path.join(DIST, 'version.json'), JSON.stringify({
+/* 只放版本与下载地址，不放构建日期 —— 否则每天构建都会制造一次无意义的 diff。 */
+const VER_JSON = JSON.stringify({
   version: APP_VER,
-  releasedAt: new Date().toISOString().slice(0, 10),
   apk: { version: APP_VER, url: APK_DL },
-}, null, 2) + '\n');
+}, null, 2) + '\n';
+fs.writeFileSync(path.join(DIST, 'version.json'), VER_JSON);
+/* 仓库根也要一份：GitHub Pages 是**直接从仓库根发布**的（不是 dist/），
+   只写 dist 的话 Pages 上的 /version.json 会 404，那边的「检查更新」就少了最稳的判据。
+   内容不一致时才写，避免每次构建都把工作区弄脏。 */
+const rootVerPath = path.join(ROOT, 'version.json');
+const prevVer = fs.existsSync(rootVerPath) ? fs.readFileSync(rootVerPath, 'utf8') : '';
+if (prevVer !== VER_JSON) fs.writeFileSync(rootVerPath, VER_JSON);
 
 /* ---------- 4. 自检：dist 必须自给自足 ---------- */
 const problems = [];
@@ -226,6 +233,13 @@ if (!fs.existsSync(vjPath)) {
   if (vj && vj.version !== APP_VER) {
     problems.push(`dist/version.json 的版本 ${vj.version} 与 app.js 的 ${APP_VER} 不一致`);
   }
+}
+/* 仓库根那份是给 GitHub Pages 用的（Pages 直接从仓库根发布，不认 dist/）。
+   两份必须是同一份内容，否则两个站点会各报一个版本。 */
+if (!fs.existsSync(rootVerPath)) {
+  problems.push('仓库根缺 version.json —— GitHub Pages 上 /version.json 会 404');
+} else if (fs.readFileSync(rootVerPath, 'utf8') !== fs.readFileSync(vjPath, 'utf8')) {
+  problems.push('仓库根 version.json 与 dist/version.json 内容不一致');
 }
 
 // 4g. sw.js 必须放行 version.json（缓存优先会一直供旧版本号，按钮又会骗人）

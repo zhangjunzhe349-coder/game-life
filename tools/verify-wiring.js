@@ -435,6 +435,21 @@ if (/pathname\.endsWith\('\/version\.json'\)/.test(sw)) {
 } else {
   problems.push('sw.js 没有放行 version.json —— 缓存优先会让检查更新一直读到旧版本号');
 }
+/* GitHub Pages 是**从仓库根发布**的（不是 dist/）：根上少了这份，Pages 那边的检查更新
+   就只能靠跨域 API，慢且容易被墙。 */
+const rootVerPath = path.join(ROOT, 'version.json');
+const appVer = (/APP_VERSION = '([^']+)'/.exec(app) || [])[1];
+if (!fs.existsSync(rootVerPath)) {
+  problems.push('仓库根没有 version.json —— GitHub Pages 从仓库根发布，那边 /version.json 会 404');
+} else {
+  let rv = null;
+  try { rv = JSON.parse(fs.readFileSync(rootVerPath, 'utf8')); } catch (e) { /* 下面统一报 */ }
+  if (!rv || rv.version !== appVer) {
+    problems.push(`仓库根 version.json 的版本 ${rv && rv.version} 与 app.js 的 ${appVer} 不一致（跑一次 build-dist）`);
+  } else {
+    ok.push(`仓库根 version.json 与 app.js 同版（v${appVer}）—— Pages 上也能读到权威清单`);
+  }
+}
 
 /* sw.js 侧的兜底通道：新 SW 卡在 waiting 时，页面发消息催它上位 */
 const msgBody = (sw.match(/addEventListener\('message'[\s\S]*?\n\}\);/) || [''])[0];
