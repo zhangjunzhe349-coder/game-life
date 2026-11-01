@@ -147,6 +147,23 @@ https://github.com/zhangjunzhe349-coder/game-life/releases/download/android-late
 
 手机上装包要允许「安装未知来源应用」。仓库 Actions 页也能手动触发构建。
 
+**扫码卡片**（工作区根 `qr-apk-download.png`）由 `tools/gen-qr-apk.py` 生成：
+
+```bash
+python game-life/tools/gen-qr-apk.py           # 拉线上真实版本/体积 → 重绘 → 自动对账
+python game-life/tools/gen-qr-apk.py --check   # 只对账；退出码 1 = 卡片已过期
+python game-life/tools/gen-qr-apk.py --version v1.10.1 --size 5.4MB   # 完全离线重绘
+```
+
+码里编的就是上面那条**固定链接**（tag `android-latest` + 文件名 `GameLife.apk`），
+CI 每次出包是**原地覆盖同一个资产**，所以码永远指向最新包、永远不用换。
+卡片上印的「版本 / 体积」是静态文字、会随发版过期 ——
+脚本会把绘制时的版本 / 体积 / sha256 写进 **PNG 的 `tEXt` 块**
+（`gamelife.version` / `gamelife.apk.bytes` / `gamelife.apk.sha256`），
+`--check` 拿它跟 GitHub Release 逐项对账，不一致直接退出码 1。
+这样图片自己记得「我是按哪个版本画的」，不会再有「图上印 v1.7.5、实际早已 v1.10.1」
+那种只有人眼才发现的过期。**每次发完 APK 顺手跑一次 `--check`。**
+
 APK 与 PWA 的差别：
 
 | | APK | PWA |
