@@ -29,9 +29,15 @@
   }
   function isCollapsed(gid) { return collapsed().indexOf(gid) !== -1; }
 
+  /* 条长：v1.11.0 起交给 GL.attrBarPct —— 有理想区间的项（体温）按健康度画，
+     否则 36.5℃ 正常却只填 25% 的条，跟旁边的「😊 正常」自相矛盾。 */
   function pct(a) {
-    const lo = a.min, hi = Math.max(a.max, a.min + 1);
-    return Math.max(0, Math.min(100, Math.round(((a.value - lo) / (hi - lo)) * 100)));
+    return Math.max(0, Math.min(100, Math.round(GL.attrBarPct(a))));
+  }
+
+  /* 数值 + 单位（体温显示 36.5℃）。单位不参与计算，只影响显示。 */
+  function numHTML(a) {
+    return `${a.value}${a.unit ? `<i class="ag-unit">${GL.esc(a.unit)}</i>` : ''}`;
   }
 
   /* 极性 → CSS 类名后缀，样式表据此换色 */
@@ -42,23 +48,29 @@
     const p = pct(a);
     const open = tuneFor === a.id;
     const sub = a.sub ? `<span class="ag-sub" title="${GL.esc(a.sub)}">${GL.esc(a.sub)}</span>` : '';
+    /* 步长跟着属性走：0~100 的项走 1 / 5，体温（35~41）走 0.1 / 0.5 ——
+       否则「−5」一按就从 36.5 掉到 31.5，直接跨出量程。 */
+    const st = a.step || 1;
+    const big = Number((st * 5).toFixed(2));
+    const nx = (v) => Number(v.toFixed(2));
     return `<button type="button" class="ag-row ${pol(a)}${open ? ' tune-open' : ''}"
         data-aid="${a.id}" aria-expanded="${open}"
         title="${GL.esc(a.name)} · ${GL.POL_NAME[a.polarity] || GL.POL_NAME.pos}">
       <span class="ag-label"><span class="ag-t">${GL.esc(a.name)}</span>${sub}</span>
-      <span class="ag-num">${a.value}</span>
+      <span class="ag-num">${numHTML(a)}</span>
       <span class="ag-track">
         <i style="width:${p}%"></i>
-        ${a.polarity === 'mid' ? '<b class="ag-ideal" title="理想区间"></b>' : ''}
+        ${a.polarity === 'mid' && !a.ideal ? '<b class="ag-ideal" title="理想区间"></b>' : ''}
       </span>
     </button>
       ${open ? `<div class="ag-tune" data-aid="${a.id}">
       <div class="ag-tune-row">
-        <button type="button" class="btn mini" data-attr-step="-5">−5</button>
-        <button type="button" class="btn mini" data-attr-step="-1">−1</button>
-        <input type="number" data-attr-set value="${a.value}" min="${a.min}" max="${a.max}" aria-label="${GL.esc(a.name)} 数值">
-        <button type="button" class="btn mini" data-attr-step="1">＋1</button>
-        <button type="button" class="btn mini" data-attr-step="5">＋5</button>
+        <button type="button" class="btn mini" data-attr-step="${nx(-big)}">−${big}</button>
+        <button type="button" class="btn mini" data-attr-step="${nx(-st)}">−${st}</button>
+        <input type="number" data-attr-set value="${a.value}" min="${a.min}" max="${a.max}"
+               step="${st}" aria-label="${GL.esc(a.name)} 数值">
+        <button type="button" class="btn mini" data-attr-step="${nx(st)}">＋${st}</button>
+        <button type="button" class="btn mini" data-attr-step="${nx(big)}">＋${big}</button>
         <span class="ag-tune-note">${GL.esc(tuneNote(a))}</span>
       </div>
       ${GL.textEditBox(a, 'attr')}
@@ -93,7 +105,7 @@
     return `<div class="edit-box" data-aid="${a.id}">
       <div class="card-head" style="margin:0;padding:0 0 8px;border:0">
         <span class="card-title" style="font-size:14px">${GL.esc(a.name)}</span>
-        <span class="card-hint">${a.min} ~ ${a.max}</span>
+        <span class="card-hint">${a.min} ~ ${a.max}${a.unit ? ' ' + GL.esc(a.unit) : ''}</span>
       </div>
       <div class="form-row">
         <label class="field-label" style="margin:0;flex:1">刻度语义</label>
@@ -102,8 +114,8 @@
         </select>
       </div>
       <div class="form-row">
-        <input type="number" value="${a.min}" data-attr-min style="width:76px" aria-label="最小分">
-        <input type="number" value="${a.max}" data-attr-max style="width:76px" aria-label="最大分">
+        <input type="number" value="${a.min}" data-attr-min step="${a.step || 1}" style="width:76px" aria-label="最小分">
+        <input type="number" value="${a.max}" data-attr-max step="${a.step || 1}" style="width:76px" aria-label="最大分">
         <button class="btn mini" data-attr-range>更新区间</button>
       </div>
       <label class="field-label">等级描述（每行一条：分数|描述，从高到低）</label>
@@ -186,7 +198,10 @@
 
   function setValue(a, v) {
     const lo = a.min, hi = Math.max(a.max, a.min + 1);
-    a.value = Math.round(Math.min(hi, Math.max(lo, v)));
+    const st = a.step || 1;
+    const clamped = Math.min(hi, Math.max(lo, v));
+    /* 按步长量化：0~100 的项仍取整，体温保留一位小数（36.5 不能被 Math.round 吃掉） */
+    a.value = Number((Math.round(clamped / st) * st).toFixed(2));
     (a.history = a.history || []).push({ t: Date.now(), v: a.value });
     GL.changed();
   }
@@ -287,7 +302,8 @@
         const max = Number(box.querySelector('[data-attr-max]').value);
         if (!(max > min)) { GL.toast('最大分必须大于最小分', 'err'); return; }
         a.min = min; a.max = max;
-        a.value = Math.round(Math.min(max, Math.max(min, a.value)));
+        const st = a.step || 1;
+        a.value = Number((Math.round(Math.min(max, Math.max(min, a.value)) / st) * st).toFixed(2));
         GL.toast('区间已更新', 'ok');
         GL.changed();
       } else if (e.target.dataset.attrSave !== undefined) {

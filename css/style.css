@@ -402,6 +402,11 @@ b { font-weight: 700; }
   font-variant-numeric: tabular-nums; text-align: right;
   min-width: 22px; color: var(--text);
 }
+/* 单位（体温的 ℃）：跟着数值，但不抢数字的视觉重量 */
+.ag-unit {
+  font-style: normal; font-size: var(--fs-2xs); font-weight: 400;
+  color: var(--faint); margin-left: 1px;
+}
 .ag-track {
   position: relative; display: block; flex: none;
   width: 56px; height: 3px; border-radius: var(--r-pill);
@@ -676,13 +681,10 @@ b { font-weight: 700; }
 .dl-ops { display: flex; gap: var(--s2); }
 .dl-empty { padding: var(--s5) 0; text-align: center; font-size: var(--fs-sm); color: var(--faint); }
 
-/* ============ 电子衣橱折叠块 ============
-   v1.8.1 起整宽铺开。原先它挂在中间栏的立绘下方，只有约 300px ——
-   41 张卡片的网格在那里挤成一列，所以改为独立一块，独占整行宽度。 */
-.wardrobe-block { display: flex; flex-direction: column; gap: var(--s3); }
-.ctrl-toggle { display: flex; gap: var(--s2); flex-wrap: wrap; }
-#avatar-panel[hidden] { display: none !important; }
-#avatar-panel { display: block; }
+/* ============ 电子衣橱（v1.11.0 独立成页） ============
+   原先是总览页底部可折叠的一块（.wardrobe-block / .ctrl-toggle / #avatar-panel）。
+   用户要求「底部的四个总栏目现在新增一个电子衣橱的页面」→ 折叠那套整体撤掉，
+   现在由 #panel-wardrobe 承载，页签切换即显示。 */
 #wardrobe-ctrl[hidden] { display: none !important; }
 
 /* ============ 电子衣橱：左搭配框 / 右选择区 ============ */
@@ -737,24 +739,86 @@ b { font-weight: 700; }
 .wr-grid {
   display: grid; gap: var(--s3);
   grid-template-columns: repeat(auto-fill, minmax(122px, 1fr));
-  max-height: 440px; overflow-y: auto; overscroll-behavior: contain;
+  /* v1.11.0：衣橱独立成页后不再限高 —— 41 件在 440px 的框里滚，是「折叠块」时代的遗产；
+     整页自己滚一次，手机端也免得掉进嵌套滚动（手指一滑先滚小框，很别扭）。 */
   padding: 3px;                                     /* 给选中态的边框留出空间 */
 }
+.wr-empty {
+  grid-column: 1 / -1; padding: var(--s5) 0; text-align: center;
+  font-size: var(--fs-sm); color: var(--faint);
+}
 .wr-card {
+  position: relative;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: var(--s2) var(--s2) 6px;
   border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--surface-2); cursor: pointer;
+  background: var(--surface-2);
   transition: all var(--dur-fast) ease-out;
 }
 .wr-card img { width: 100%; aspect-ratio: 1 / 1; object-fit: contain; pointer-events: none; }
+/* 卡片主体是 button：穿 / 脱走这里，右上角的 ✎ 才管编辑 —— 两个动作不抢同一个热区 */
+.wr-hit {
+  display: block; width: 100%; padding: 0; border: 0; background: none;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
 .wr-label {
   max-width: 100%; font-size: var(--fs-2xs); color: var(--muted); letter-spacing: 0.02em;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.wr-name { font-weight: 400; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.wr-meta { font-style: normal; font-size: 9px; color: var(--faint); letter-spacing: 0.04em; }
 .wr-card:hover { border-color: var(--accent-line); background: var(--surface-3); }
 .wr-card.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px rgba(60, 232, 176, 0.16); }
 .wr-card.on .wr-label { color: var(--accent); font-weight: 500; }
+/* 右上角编辑：压在图片角上，不占布局位置（卡片只有 122px 宽，挤不下第三行） */
+.wr-edit {
+  position: absolute; top: 3px; right: 3px;
+  width: 24px; height: 24px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: rgba(8, 9, 13, 0.72); color: var(--faint);
+  font-size: 12px; line-height: 1; cursor: pointer;
+  transition: all var(--dur-fast) ease-out;
+}
+.wr-edit:hover, .wr-edit:focus-visible { color: var(--accent); border-color: var(--accent-line); }
+
+/* ---------- 筛选（季节 / 年份） ----------
+   用户：「右边上方加一个顶层筛选 夏装、冬装」「分类属性可以按年分也可以按季节分」 */
+.wr-filters { display: flex; flex-direction: column; gap: var(--s2); }
+.wr-frow { display: flex; align-items: center; gap: var(--s2); }
+.wr-flabel {
+  flex: none; width: 30px;
+  font-size: var(--fs-2xs); letter-spacing: 0.12em; color: var(--faint);
+}
+.wr-chips { display: flex; flex-wrap: wrap; gap: var(--s1); }
+.wr-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 26px; padding: 0 var(--s2);
+  border-radius: var(--r-pill); border: 1px solid var(--line);
+  background: transparent; color: var(--muted);
+  font-size: var(--fs-2xs); letter-spacing: 0.04em; cursor: pointer;
+  transition: all var(--dur-fast) ease-out;
+}
+.wr-chip i { font-style: normal; font-family: var(--font-mono); color: var(--faint); }
+.wr-chip:hover { color: var(--accent); border-color: var(--accent-line); }
+.wr-chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.wr-count { font-size: var(--fs-2xs); color: var(--faint); letter-spacing: 0.04em; }
+
+/* ---------- 就地编辑面板 ----------
+   用户对浮窗的态度一贯是「不要浮窗，直接展开」，所以它铺在网格上方，占满整宽 */
+.wr-editbox {
+  display: flex; flex-direction: column; gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--accent-line); border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.wr-eb-head { display: flex; align-items: center; justify-content: space-between; }
+.wr-eb-title { font-size: var(--fs-sm); color: var(--accent); letter-spacing: 0.04em; }
+.wr-eb-row { display: flex; flex-wrap: wrap; gap: var(--s3); }
+.wr-eb-row > div { display: flex; flex-direction: column; gap: 4px; flex: 1 1 96px; min-width: 0; }
+.wr-eb-row select { width: 100%; }
+.wr-eb-note { font-size: var(--fs-2xs); color: var(--faint); }
 
 /* 手机端：左搭配右选择（用户指定），左侧压缩到 112px，选择区两列 */
 @media (max-width: 900px) {
@@ -768,9 +832,14 @@ b { font-weight: 700; }
   .wr-stage { grid-column: 1; grid-row: 1; height: 54px; }
   .wr-tag { grid-column: 1; grid-row: 2; }
   .wr-wear { grid-column: 1; grid-row: 3; font-size: var(--fs-2xs); -webkit-line-clamp: 2; }
-  .wr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 380px; }
+  .wr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wr-cats { gap: var(--s1); }
   .wr-cat { min-height: 30px; padding: 0 var(--s2); font-size: var(--fs-2xs); }
+  /* 手机上 24px 的 ✎ 太小点不准，抬到 28px 并贴紧右上角 */
+  .wr-edit { width: 28px; height: 28px; font-size: 13px; }
+  .wr-flabel { width: 26px; }
+  .wr-chip { min-height: 28px; }
+  .wr-eb-row { gap: var(--s2); }
 }
 
 /* ============ 卡片（技能页 / 生命页 / 设置页共用） ============ */

@@ -190,6 +190,10 @@ const MARKS = `(async () => {
     /* 每日必做（v1.10.0 起顶替个人信息条）：条目数 = 渲染链完整跑通的证据。
        旧版（≤ v1.9.0）没有 #dailies-card，所以它也是「新版真的生效」的判据。 */
     dlItems: dl ? dl.querySelectorAll('.dl-item').length : -1,
+    /* v1.11.0 判据：属性 16 项（新增体温 / 总体力值）、底部 5 个页签（新增衣橱）。
+       旧版（≤ v1.10.1）分别是 14 项与 4 个 —— 只改版本号常量不会让它们变。 */
+    attrCount: (g.state && g.state.attributes || []).length,
+    tabCount: document.querySelectorAll('.tab').length,
     portraitGone: !document.getElementById('portrait-svg'),
     /* v1.8.2 的两条「新代码真的跑起来了」判据：
        设置页只剩 2 张卡、技能默认是 13 个紧凑小卡。
@@ -502,6 +506,9 @@ self.addEventListener('activate', () => {
     check(m1.settingsCards === 2 && m1.skTiles === 13,
       `v1.8.2 新代码确实跑起来了（设置页 ${m1.settingsCards} 张卡 / 技能 ${m1.skTiles} 个小卡）`);
     check(m1.dlItems === 5, `每日必做 5 条已渲染（实测 ${m1.dlItems} 条）`);
+    /* v1.11.0 判据：属性 16 项 + 5 个页签（衣橱独立成页） */
+    check(m1.attrCount === 16 && m1.tabCount === 5,
+      `v1.11.0 新代码确实跑起来了（属性 ${m1.attrCount} 项 / 页签 ${m1.tabCount} 个）`);
     /* 这里断言的是**要求**（页头必须留出状态栏空间），不是**变化** ——
        早先写成「必须比旧版更大」，一旦拿 v1.7.4 当旧版（它已经有这条留白）
        就会无辜报错。校验脚本自己也要避免这种「只对某个特定旧版成立」的判据。 */

@@ -109,9 +109,9 @@ ITEMS = [
     (30, 'w30', '军绿短袖',         'top',    'top'),
     (31, 'w31', '米白拉链外套',     'top',    'top'),
     (32, 'w32', '灰色工装裤',       'bottom', 'bottom'),
-    (33, 'w33', '红色双肩包',       'accessory', 'bag'),
-    (34, 'w34', '军绿双肩包',       'accessory', 'bag'),
-    (35, 'w35', '黑色斜挎包',       'accessory', 'bag'),
+    (33, 'w33', '红色双肩包',       'bag',     'bag'),
+    (34, 'w34', '军绿双肩包',       'bag',     'bag'),
+    (35, 'w35', '黑色斜挎包',       'bag',     'bag'),
     (36, 'w36', '墨镜',             'accessory', 'glass'),
     (37, 'w37', '米白洞洞鞋',       'shoes',  'shoes'),
     (38, 'w38', '白黑运动鞋',       'shoes',  'shoes'),
@@ -324,7 +324,7 @@ def build(only=None, probe=False, white=False):
         f.write('/* 由 tools/build-wardrobe.py 生成，请勿手改。\n'
                 '   ⚠ 必须在 js/storage.js **之后**引入 —— GL 是 storage.js 建的，\n'
                 '     本文件是裸 `GL.WARDROBE_LIB = …`，排在前面会 ReferenceError。\n'
-                '   单品清单：id / name / slot(top|bottom|shoes|accessory) / cat(归一框)\n'
+                '   单品清单：id / name / slot(top|bottom|shoes|bag|accessory) / cat(归一框)\n'
                 '             color(主体平均色，矢量立绘用) / box(主体在 512 画布里的外接框)\n'
                 '             img(单品的完整相对路径 —— **必须是字面量**，\n'
                 '                 tools/build-dist.js 靠扫字面量收集产物，拼接的路径它看不见)\n'

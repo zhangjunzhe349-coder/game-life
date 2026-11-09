@@ -458,7 +458,7 @@ GL.WARDROBE_LIB = [
   {
     "id": "w33",
     "name": "红色双肩包",
-    "slot": "accessory",
+    "slot": "bag",
     "cat": "bag",
     "color": "#be223c",
     "box": [
@@ -472,7 +472,7 @@ GL.WARDROBE_LIB = [
   {
     "id": "w34",
     "name": "军绿双肩包",
-    "slot": "accessory",
+    "slot": "bag",
     "cat": "bag",
     "color": "#616154",
     "box": [
@@ -486,7 +486,7 @@ GL.WARDROBE_LIB = [
   {
     "id": "w35",
     "name": "黑色斜挎包",
-    "slot": "accessory",
+    "slot": "bag",
     "cat": "bag",
     "color": "#363036",
     "box": [

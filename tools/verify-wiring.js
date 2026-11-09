@@ -86,8 +86,9 @@ if (scripts.some((s) => /three/i.test(s))) {
    且 GL.state.avatar 的身高/体重/肌肉量数据仍被衣橱与备份消费 —— 只是编辑入口没了。
    要恢复个人信息条，把节点加回来即可，不用改 avatar.js。 */
 const NEEDED = ['dailies-card', 'hud-lv', 'hud-readouts', 'wing-attrs', 'wing-body',
-  'tabs', 'ctrl-toggle', 'avatar-panel', 'wardrobe-ctrl',
-  'panel-hud', 'panel-skills', 'panel-life', 'panel-settings', 'toast-box', 'main'];
+  'tabs', 'wardrobe-ctrl',
+  'panel-hud', 'panel-skills', 'panel-wardrobe', 'panel-life', 'panel-settings',
+  'toast-box', 'main'];
 for (const id of NEEDED) {
   if (!new RegExp(`id="${id}"`).test(html)) problems.push(`index.html 缺少宿主节点 #${id}`);
 }
@@ -268,8 +269,70 @@ if (/fonts\.(googleapis|gstatic)\.com/.test(html)) {
   ok.push('字体完全自托管，无外部字体依赖（离线可用）');
 }
 
+/* ---------- 6e-2. 属性体系与衣橱分类（v1.11.0） ----------
+   用户 2026-11-09 的两条要求，任何一条在代码里被改回去都要在这里报红：
+     ① 「两个归入原先的三大体系（体温 / 总体力值），情绪值单开一个大体系」
+     ② 「电子衣橱：上衣 / 下装 / 鞋 / 包 / 配饰，顶层筛夏装冬装，每件可编辑年份与季节」
+   数据版本同时必须落在 v5 —— 老用户靠 v4→v5 迁移才看得到这三项。 */
+const groupsSrc = (storageSrc.match(/const ATTR_GROUPS = \[([\s\S]*?)\n  \];/) || [])[1] || '';
+const groupIds = Array.from(groupsSrc.matchAll(/id: '([a-z]+)'/g)).map((m) => m[1]);
+if (groupIds.length === 4 && groupIds.indexOf('emotion') !== -1) {
+  ok.push(`属性分为四大体系（${groupIds.join(' / ')}）—— 情绪已从精神力里单列`);
+} else {
+  problems.push(`属性分组不是「三大体系 + 情绪」共四组（当前 ${groupIds.join(' / ') || '解析失败'}）`);
+}
+
+const defsSrc = (storageSrc.match(/const ATTR_DEFS = \[([\s\S]*?)\n  \];/) || [])[1] || '';
+const hasTemp = /\['temp',\s*'体温'[\s\S]{0,40}'physio'/.test(defsSrc);
+const hasStamina = /\['stamina',\s*'总体力值'[\s\S]{0,40}'physio'/.test(defsSrc);
+if (hasTemp && hasStamina) ok.push('体温 / 总体力值都已归入生理值组');
+else problems.push(`新属性缺项：体温 ${hasTemp ? '在' : '不在'} / 总体力值 ${hasStamina ? '在' : '不在'}`);
+
+if (/\['temp',[\s\S]{0,160}?ideal:\s*\[36\.1,\s*37\.2\]/.test(defsSrc)) {
+  ok.push('体温带理想区间 36.1~37.2（按「离正常值多远」计分，不按量程百分比）');
+} else {
+  problems.push('体温缺 ideal 理想区间 —— 36.5℃ 会被算成 (36.5-35)/(41-35)=25 分，正常体温被判成低分');
+}
+
+if (/\['mood',\s*'情绪值',\s*'（挫折感）',\s*'emotion',\s*'neg'/.test(defsSrc)) {
+  ok.push('情绪值＝挫折感（emotion 组 · 负向：越低越好）');
+} else {
+  problems.push('情绪值没有落在 emotion 组 / 极性不是 neg —— 挫折感是「越低越好」，混进正向组会把组均值读反');
+}
+
+if (/version:\s*5/.test(storageSrc) && /if \(prevVer < 5\) migrateV4toV5\(\)/.test(storageSrc)) {
+  ok.push('数据版本 v5 + v4→v5 迁移已接上（老用户的属性/衣橱靠它补齐）');
+} else {
+  problems.push('数据版本不是 5，或 load() 里没挂 migrateV4toV5 —— 老用户升级后看不到新属性');
+}
+
+/* 衣橱：三个包必须已在 bag 分类里 */
+const wdSrc = fs.readFileSync(path.join(ROOT, 'js', 'wardrobe-data.js'), 'utf8');
+const bagIds = ['w33', 'w34', 'w35'].filter((id) => {
+  const i = wdSrc.indexOf('"id": "' + id + '"');
+  if (i < 0) return false;
+  const seg = wdSrc.slice(i, wdSrc.indexOf('"img"', i));
+  return /"slot":\s*"bag"/.test(seg);
+});
+if (bagIds.length === 3) ok.push('三只包已从「配饰」拆到独立分类 bag');
+else problems.push(`包没拆干净：${['w33', 'w34', 'w35'].filter((x) => bagIds.indexOf(x) === -1).join('、')} 仍在 accessory`);
+
+const wardrobeJs = fs.readFileSync(path.join(ROOT, 'js', 'wardrobe.js'), 'utf8');
+const wTags = [['data-f-season', '季节筛选（夏/冬）'], ['data-edit-slot', '改类别'],
+  ['data-edit-season', '改季节'], ['data-edit-year', '改买入年份']];
+const wMiss = wTags.filter(([tag]) => wardrobeJs.indexOf(tag) === -1);
+if (!wMiss.length) ok.push('衣橱页：季节筛选 + 类别 / 季节 / 年份 三个编辑口都在');
+else problems.push(`衣橱页缺少：${wMiss.map((x) => x[1]).join('、')}`);
+
+const tabCount = (html.match(/data-tab="/g) || []).length;
+if (tabCount === 5 && /data-tab="wardrobe"/.test(html)) {
+  ok.push('底部导航 5 个页签（总览 / 技能 / 衣橱 / 生命 / 设置）');
+} else {
+  problems.push(`底部导航页签数不对（当前 ${tabCount} 个）或缺少 wardrobe 页签`);
+}
+
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 21;   // v1.10.1：检查更新改成「版本清单 + SW」双判据（app.js 大改、sw.js 放行 version.json）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开 → v19 检查更新 → v20 每日必做；每轮都动了 css 或 js，资源有变就必须抬到同值
+const MIN_SW_VER = 22;   // v1.11.0：三个新属性 + 衣橱独立成页（storage/attributes/wardrobe/index/css 全动，数据 v4→v5）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开 → v19 检查更新 → v20 每日必做 → v21 检查更新双判据；每轮都动了 css 或 js，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

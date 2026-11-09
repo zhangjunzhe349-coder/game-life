@@ -66,21 +66,22 @@ const v1State = {
   GL.load();
   const A = GL.state;
 
-  check(A.attributes.length === 14, '全新：属性 14 项', '实际 ' + A.attributes.length);
+  check(A.attributes.length === 16, '全新：属性 16 项（14 + 体温 / 总体力值）', '实际 ' + A.attributes.length);
   check(A.skills.length === 13, '全新：技能 13 项', '实际 ' + A.skills.length);
-  check(A.version === 4, '全新：version = 4', '实际 ' + A.version);
+  check(A.version === 5, '全新：version = 5', '实际 ' + A.version);
 
   const groups = [...new Set(A.attributes.map((a) => a.group))];
-  check(groups.length === 3 && groups.includes('physio') && groups.includes('mental') && groups.includes('entropy'),
-    '全新：属性分 3 组（physio / mental / entropy）', groups.join(','));
+  check(groups.length === 4 && groups.includes('physio') && groups.includes('mental')
+    && groups.includes('entropy') && groups.includes('emotion'),
+    '全新：属性分 4 组（生理 / 精神 / 熵 / 情绪）', groups.join(','));
 
   const sgroups = [...new Set(A.skills.map((s) => s.group))];
   check(sgroups.length === 5, '全新：技能分 5 组', sgroups.join(','));
 
   const negAp = A.attributes.filter((a) => a.polarity === 'neg');
-  check(negAp.length === 4, '全新：负向指标 4 项（熵值3 + 困倦度）', '实际 ' + negAp.length);
+  check(negAp.length === 5, '全新：负向指标 5 项（熵值3 + 困倦度 + 情绪/挫折感）', '实际 ' + negAp.length);
   const midAp = A.attributes.filter((a) => a.polarity === 'mid');
-  check(midAp.length === 2, '全新：双向指标 2 项（社交度、稳定度）', '实际 ' + midAp.length);
+  check(midAp.length === 3, '全新：双向指标 3 项（社交度、稳定度、体温）', '实际 ' + midAp.length);
 
   // 负向指标初始值应低于正向，否则新用户看到红长条会误判状态很差
   const negVals = negAp.map((a) => a.value);
@@ -108,9 +109,9 @@ const v1State = {
   GL.load();
   const A = GL.state;
 
-  check(A.attributes.length === 14, '迁移：属性换为 14 项新体系', '实际 ' + A.attributes.length);
+  check(A.attributes.length === 16, '迁移：属性换为 16 项新体系', '实际 ' + A.attributes.length);
   check(A.skills.length === 13, '迁移：技能换为 13 项新体系', '实际 ' + A.skills.length);
-  check(A.version === 4, '迁移：version 升到 4');
+  check(A.version === 5, '迁移：version 升到 5');
 
   // 同语义的技能经验必须保住
   const writing = A.skills.find((s) => s.id === 'writing');
@@ -138,13 +139,13 @@ const v1State = {
 
   // 迁移后应能正常分组渲染
   const byGroup = GL.attrByGroup();
-  check(byGroup.length === 3 && byGroup.every((g) => Array.isArray(g.items)),
+  check(byGroup.length === 4 && byGroup.every((g) => Array.isArray(g.items)),
     '迁移：GL.attrByGroup() 可用');
   check(GL.groupMean(byGroup[0].items) > 0, '迁移：GL.groupMean() 返回有效值');
 
   // 二次加载不应重复迁移（幂等）
   GL.load();
-  check(GL.state.attributes.length === 14 && GL.state.version === 4,
+  check(GL.state.attributes.length === 16 && GL.state.version === 5,
     '迁移：重复 load 幂等（不会叠加）', '属性 ' + GL.state.attributes.length + ' 项');
 }
 
@@ -176,7 +177,7 @@ const v1State = {
   const attr = (id) => B.attributes.find((a) => a.id === id);
   const skill = (id) => B.skills.find((s) => s.id === id);
 
-  check(B.version === 4, '还原：version 升到 4', '实际 ' + B.version);
+  check(B.version === 5, '还原：version 升到 5', '实际 ' + B.version);
 
   check(attr('move').sub === '（活动半径）（久坐值）',
     '还原：运动度小字 = 原文「（活动半径）（久坐值）」', '实际 ' + attr('move').sub);
@@ -249,23 +250,28 @@ const v3State = {
   GL.load();
   const A = GL.state;
 
-  check(A.version === 4, '衣橱：version 升到 4', '实际 ' + A.version);
+  check(A.version === 5, '衣橱：version 升到 5（v4→v5 也跑过）', '实际 ' + A.version);
   check(A.avatar.wardrobe.length === 41, '衣橱：换成 41 件照片素材', '实际 ' + A.avatar.wardrobe.length);
   check(A.avatar.wardrobe.every((w) => w.color && Array.isArray(w.box) && w.box.length === 4),
     '衣橱：每件都带 color 与 box（立绘贴图要用）');
   check(A.avatar.wardrobe.filter((w) => w.slot === 'top').length === 24
     && A.avatar.wardrobe.filter((w) => w.slot === 'bottom').length === 8
     && A.avatar.wardrobe.filter((w) => w.slot === 'shoes').length === 5
-    && A.avatar.wardrobe.filter((w) => w.slot === 'accessory').length === 4,
-    '衣橱：分类数量 24/8/5/4（上/下/鞋/配饰）');
+    && A.avatar.wardrobe.filter((w) => w.slot === 'bag').length === 3
+    && A.avatar.wardrobe.filter((w) => w.slot === 'accessory').length === 1,
+    '衣橱：分类数量 24/8/5/3/1（上/下/鞋/包/配饰）');
+
+  check(A.avatar.wardrobe.every((w) => w.season === null && w.year === null),
+    '衣橱：每件都补上 season / year（默认未标注，等用户自己标）');
 
   const placeholderLeft = A.avatar.wardrobe.filter((w) => w.name === '白色T恤' || w.name === '黑框眼镜');
   check(placeholderLeft.length === 0, '衣橱：旧的 4 件占位单品已移除',
     '实际残留 ' + placeholderLeft.length);
 
   check(A.avatar.outfit.top === null && A.avatar.outfit.bottom === null
-    && A.avatar.outfit.shoes === null && A.avatar.outfit.accessory === null,
-    '衣橱：outfit 四个槽位已清空（旧 id 已失效）');
+    && A.avatar.outfit.shoes === null && A.avatar.outfit.bag === null
+    && A.avatar.outfit.accessory === null,
+    '衣橱：outfit 五个槽位已清空（含新增的 bag，旧 id 已失效）');
 
   check(A.avatar.legacyWardrobe.length === 1
     && A.avatar.legacyWardrobe[0].name === '我自己加的外套',
@@ -278,7 +284,7 @@ const v3State = {
 
   // 幂等：第二次 load 不能再搬一遍，也不能把留档清掉
   GL.load();
-  check(GL.state.version === 4 && GL.state.avatar.wardrobe.length === 41
+  check(GL.state.version === 5 && GL.state.avatar.wardrobe.length === 41
     && GL.state.avatar.legacyWardrobe.length === 1,
     '衣橱：重复 load 幂等（不会二次迁移、留档不丢）');
 }
@@ -380,6 +386,87 @@ function checkDailies() {
   }
 }
 checkDailies();
+
+/* ============ 用例 7：v4 → v5（v1.11.0 三个新属性 + 衣橱分类重整） ============
+   为什么单独立一条：前面几条都是从 v1/v3 一路迁上来，混着看会掩盖
+   「v4 用户单独升级」这一条最常见路径。这里造一份**标准的 v4 数据**：
+     · 没有 temp / stamina 两项
+     · mood 还在 mental 组、正向、值 70、有两条历史
+     · 三只包还在 accessory
+     · 单品没有 season / year，outfit 只有四个槽
+   迁移后必须：补齐、情绪值取反并单列、包改类、补字段 —— 且**不覆盖用户改过的名字**。 */
+{
+  const { GL, store } = boot();
+  GL.load();                                     // 拿一份完整 v5 数据当底稿
+  const v4 = JSON.parse(JSON.stringify(GL.state));
+
+  v4.version = 4;
+  v4.attributes = v4.attributes.filter((a) => a.id !== 'temp' && a.id !== 'stamina');
+
+  const mood = v4.attributes.find((a) => a.id === 'mood');
+  mood.group = 'mental';
+  mood.polarity = 'pos';
+  mood.sub = '';
+  mood.value = 70;
+  mood.history = [{ t: 1000, v: 70 }, { t: 2000, v: 80 }];
+  mood.levels = [{ min: 80, label: '🔥 充沛' }, { min: -999, label: '😫 糟糕' }];
+
+  // 用户改过名字的一项：迁移不许覆盖
+  const renamed = v4.attributes.find((a) => a.id === 'sleep');
+  renamed.name = '我改的睡眠名';
+
+  // 用户自建的属性：迁移不许删
+  v4.attributes.push({
+    id: 'myown', name: '我的自定义项', sub: '', note: '', group: 'physio',
+    polarity: 'pos', min: 0, max: 100, value: 88, levels: [{ min: -999, label: 'x' }], history: [],
+  });
+
+  v4.avatar.outfit = { top: null, bottom: null, shoes: null, accessory: null };
+  v4.avatar.wardrobe.forEach((w) => {
+    if (w.id === 'w33' || w.id === 'w34' || w.id === 'w35') w.slot = 'accessory';
+    delete w.season;
+    delete w.year;
+  });
+
+  store['gamelife_state_v1'] = JSON.stringify(v4);
+  GL.load();
+  const A = GL.state;
+  const has = (id) => A.attributes.find((a) => a.id === id);
+
+  check(A.version === 5, 'v5：version 升到 5', '实际 ' + A.version);
+  check(!!has('temp') && has('temp').group === 'physio',
+    'v5：体温已补进生理值组', has('temp') ? has('temp').group : '缺失');
+  check(has('temp') && has('temp').value === 36.5 && has('temp').unit === '℃',
+    'v5：体温初值 36.5℃（不是 0~100 的中点 55）',
+    has('temp') ? has('temp').value + ' / ' + has('temp').unit : '缺失');
+  check(has('temp') && Array.isArray(has('temp').ideal) && has('temp').ideal[0] === 36.1,
+    'v5：体温带理想区间（按偏离正常值计分）');
+  check(!!has('stamina') && has('stamina').group === 'physio',
+    'v5：总体力值已补进生理值组', has('stamina') ? has('stamina').group : '缺失');
+
+  const m2 = has('mood');
+  check(m2 && m2.group === 'emotion', 'v5：情绪值已搬到独立的 emotion 组', m2 ? m2.group : '缺失');
+  check(m2 && m2.polarity === 'neg', 'v5：情绪值极性改为负向（挫折感越低越好）', m2 ? m2.polarity : '缺失');
+  check(m2 && m2.sub === '（挫折感）', 'v5：情绪值小字＝挫折感', m2 ? m2.sub : '缺失');
+  check(m2 && m2.value === 30, 'v5：当前值取反（正向心情 70 → 挫折感 30）', m2 ? '实际 ' + m2.value : '缺失');
+  check(m2 && m2.history.length === 2 && m2.history[0].v === 30 && m2.history[1].v === 20,
+    'v5：历史值一并取反（趋势图方向才对）',
+    m2 ? m2.history.map((h) => h.v).join(',') : '缺失');
+
+  check(has('sleep') && has('sleep').name === '我改的睡眠名',
+    'v5：用户改过的属性名不被覆盖', has('sleep') ? has('sleep').name : '缺失');
+  check(!!has('myown') && has('myown').value === 88,
+    'v5：用户自建的属性不删、分值不动', has('myown') ? String(has('myown').value) : '被删了');
+
+  const bags = ['w33', 'w34', 'w35'].filter((id) => {
+    const w = A.avatar.wardrobe.find((x) => x.id === id);
+    return w && w.slot === 'bag';
+  });
+  check(bags.length === 3, 'v5：三只包从配饰改到 bag 分类', '改到 ' + bags.length + ' 只');
+  check(A.avatar.wardrobe.every((w) => w.season !== undefined && w.year !== undefined),
+    'v5：每件单品都补了 season / year 字段');
+  check(A.avatar.outfit.bag === null, 'v5：outfit 补上 bag 槽位');
+}
 
 /* ============ 输出 ============ */
 console.log('=== 数据迁移校验 ===\n');

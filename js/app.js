@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.10.1';
+  const APP_VERSION = '1.11.0';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 顶部 HUD 读数 ----------
@@ -65,26 +65,11 @@
       /* v1.8.2 起技能详情是**就地展开**（完整卡在 panel-skills 内部），
          切页签时不需要任何收尾 —— 展开态跟着面板一起隐藏、切回来还在。 */
       if (id === 'life') GL.renderLife();
+      /* v1.11.0：衣橱独立成页。切进来时重画一次 —— 41 张图带 loading="lazy"，
+         首屏不加载，切页时才解码。 */
+      if (id === 'wardrobe' && GL.renderWardrobe) GL.renderWardrobe();
       reveal(document.getElementById('panel-' + id));
       window.scrollTo({ top: 0 });
-    });
-  }
-
-  /* ---------- 舞台下方折叠面板：电子衣橱 ----------
-     v1.8.1 起中央立绘移除，衣橱面板不再嵌在中间栏（那样只有 300px 宽，
-     41 张卡片的网格展不开），改为整宽块。原来的「体型」第二个页签也一并去掉 ——
-     体型参数已变成顶部那条「个人信息」，不必再占衣橱面板的空间。 */
-  function initCtrlToggle() {
-    const btn = document.getElementById('ctrl-toggle');
-    const panel = document.getElementById('avatar-panel');
-    if (!btn || !panel) return;
-
-    btn.addEventListener('click', () => {
-      const open = panel.hidden;
-      panel.hidden = !open;
-      btn.setAttribute('aria-expanded', String(open));
-      btn.textContent = open ? '× 收起衣橱' : '👗 电子衣橱';
-      if (open && GL.renderWardrobe) GL.renderWardrobe();
     });
   }
 
@@ -122,7 +107,7 @@
     <div class="card">
       <div class="card-head"><span class="card-title">ℹ️ 关于</span><span class="card-hint">LOCAL-FIRST · v${APP_VERSION}</span></div>
       <div class="dim">
-        Game Life v${APP_VERSION} · 每日必做 / 生理追踪 / 属性面板 / 技能成长 / 生命刻度 / 电子衣橱<br>
+        Game Life v${APP_VERSION} · 每日必做 / 生理追踪 / 属性面板 / 技能成长 / 电子衣橱 / 生命刻度<br>
         本地优先 · 无需登录 · 数据自主可控。后续可拓展：智能硬件自动同步、多端云同步、照片生成真实比例模型。
       </div>
       <div class="set-row">
@@ -597,7 +582,6 @@
     step('renderSettings', () => renderSettings());
     step('bindSettings', () => bindSettings());
     step('initTabs', () => initTabs());
-    step('initCtrlToggle', () => initCtrlToggle());
 
     // 本文件自己贡献的 HUD 视图挂进钩子链
     GL.hooks.push(renderHudBar);

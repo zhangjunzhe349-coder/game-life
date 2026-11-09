@@ -74,8 +74,15 @@
       checkUpdate 重构）—— 不抬版本号，已装过 v20 的浏览器会继续跑旧按钮。
    ② fetch 里对 version.json **直接放行**：它是「线上到底多少版」的权威清单，
       一旦被缓存优先供下去，就会一直读到旧版本号 —— 那正是要修的病。
+   v22 的改动（v1.11.0 · 三个新属性 + 衣橱独立成页）：
+   ① js/storage.js 变了（新增「情绪」组、体温 / 总体力值、v4→v5 迁移），
+      js/attributes.js（单位与小数步进）、js/wardrobe.js（重写）、
+      js/wardrobe-data.js（三只包改 slot=bag）、js/app.js（页签与版本号）、
+      index.html（新增第五个页签 #panel-wardrobe）、css/style.css 都变了。
+   ② 数据版本 v4 → v5：老用户的属性表 / 衣橱在这里补齐新字段，
+      **不抬缓存版本号他们打开的还是旧页面 + 旧迁移代码**，看不到新属性。
    ============================================================ */
-const CACHE = 'gamelife-v21';
+const CACHE = 'gamelife-v22';
 
 const ASSETS = [
   './',

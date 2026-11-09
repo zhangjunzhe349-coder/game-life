@@ -379,7 +379,7 @@ function check(ok, label, detail) {
   check(S.errors.length === 0, '无运行时异常', S.errors.length ? S.errors.slice(0, 3).join(' | ') : `${S.errors.length} 条`);
   check(S.hasGL === true, 'GL 全局已建立');
   check(S.hookCount >= 6, 'GL.hooks 注册数 ≥ 6', `实际 ${S.hookCount}`);
-  check(S.tabCount === 4, '主导航 4 个 tab', `实际 ${S.tabCount}`);
+  check(S.tabCount === 5, '主导航 5 个 tab（总览 / 技能 / 衣橱 / 生命 / 设置）', `实际 ${S.tabCount}`);
   /* ---------- 每日必做（v1.10.0）----------
      用户要求：把首页「个人信息」栏去掉，角色状态下面直接铺一排排每日必做；
      每项可编辑、可自定义添加。所以这里既查「渲染出来了没有」，
@@ -562,18 +562,21 @@ function check(ok, label, detail) {
      v1.8.1 起中央立绘移除，穿戴的可见证据从「立绘上的照片层」换成「搭配框里的 .wr-fig」。 */
   check(S.wrLib === 41, '衣橱：单品库 41 件', `实际 ${S.wrLib}`);
   check(S.wrCards === 41, '衣橱：41 件全部渲染成卡片', `实际 ${S.wrCards}`);
-  check(S.wrSlots === 3, '衣橱：搭配框 3 格（上衣 / 下装 / 鞋·配饰）', `实际 ${S.wrSlots}`);
-  check(S.wrCats === 5, '衣橱：分类页签 5 个', `实际 ${S.wrCats}`);
+  check(S.wrSlots === 4, '衣橱：搭配框 4 格（上衣 / 下装 / 鞋 / 包·配饰）', `实际 ${S.wrSlots}`);
+  check(S.wrCats === 6, '衣橱：分类页签 6 个（全部 / 上衣 / 下装 / 鞋 / 包 / 配饰）', `实际 ${S.wrCats}`);
 
   const wr = await ev(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const panel = document.getElementById('avatar-panel');
-    if (panel) panel.hidden = false;
+    /* v1.11.0：衣橱已从总览页的折叠块改成独立页签。
+       必须先点过去 —— 隐藏面板里的元素尺寸恒为 0，图片也永远不进视口不解码
+       （v1.8.2 就踩过这个坑：量隐藏面板的量到 0，断言静默报红）。 */
+    const tab = document.querySelector('.tab[data-tab="wardrobe"]');
+    if (tab) { tab.click(); await sleep(400); }
     /* 卡片图是 loading="lazy"：面板在首屏之下，不滚过去浏览器就永远不解码。
        这不是 bug，是懒加载该有的样子 —— 校验得模拟「用户滚下去看衣橱」这件事。 */
     const ctrl = document.getElementById('wardrobe-ctrl');
     if (ctrl && ctrl.scrollIntoView) ctrl.scrollIntoView({ block: 'start' });
-    await sleep(700);
+    await sleep(900);
     /* 点数「当前搭配」框里出现的单品图。立绘移除后，这就是穿戴唯一可见的凭据 ——
        语义与 v1.8.0 数立绘照片层等价：点一件 → 框里多一张。 */
     const photoN = () => document.querySelectorAll('.wr-slot .wr-fig').length;
@@ -588,7 +591,8 @@ function check(ok, label, detail) {
     };
 
     const hit = async (id) => {
-      const c = document.querySelector('.wr-card[data-item="' + id + '"]');
+      /* v1.11.0 起卡片是 div，穿 / 脱挂在里面的 .wr-hit 上（右上角 ✎ 抢不到这个热区） */
+      const c = document.querySelector('.wr-card[data-item="' + id + '"] .wr-hit');
       if (!c) return false;
       c.click(); await sleep(260); return true;
     };
@@ -612,6 +616,54 @@ function check(ok, label, detail) {
     const c1 = document.querySelector('.wr-cat[data-cat="all"]');
     if (c1) { c1.click(); await sleep(200); }
     res.nAll = document.querySelectorAll('.wr-card').length;
+
+    /* v1.11.0：包从「配饰」拆成独立分类 —— 分类里有，且真能把包穿进 bag 槽 */
+    const cb = document.querySelector('.wr-cat[data-cat="bag"]');
+    if (cb) { cb.click(); await sleep(220); }
+    res.nBag = document.querySelectorAll('.wr-card').length;
+    const c0 = document.querySelector('.wr-cat[data-cat="all"]');
+    if (c0) { c0.click(); await sleep(200); }
+    await hit('w33');
+    res.p4 = photoN();
+    res.stateBag = window.GL.state.avatar.outfit.bag;
+
+    /* 顶层季节筛选：夏装 / 冬装。
+       顺序上必须**先标季节再筛** —— 全新衣橱 41 件都未标注，
+       先点冬装拿到的是 0 件，测不出「筛选真的按季节过滤」这件事。 */
+    const sW0 = document.querySelector('.wr-chip[data-f-season="winter"]');
+    if (sW0) { sW0.click(); await sleep(220); }
+    res.nWinterBeforeTag = document.querySelectorAll('.wr-card').length;
+    const sA0 = document.querySelector('.wr-chip[data-f-season="all"]');
+    if (sA0) { sA0.click(); await sleep(200); }
+
+    /* 就地编辑：点 ✎ → 面板展开 → 改季节 → 真的落盘且卡片上显示出来 */
+    const ebh = document.querySelector('.wr-edit[data-edit="w01"]');
+    const beforeEdit = document.querySelectorAll('.wr-card[data-item="w01"] .wr-hit').length;
+    if (ebh) { ebh.click(); await sleep(260); }
+    res.editOpen = !!document.querySelector('[data-editbox="w01"]');
+    res.editIsInline = !document.querySelector('.wr-editbox [role="dialog"]')
+      && !document.querySelector('body.modal-open');
+    const sel = document.querySelector('[data-edit-season]');
+    if (sel) {
+      sel.value = 'winter';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(300);
+    }
+    const w01 = (window.GL.state.avatar.wardrobe || []).find((w) => w.id === 'w01') || {};
+    res.editSeason = w01.season;
+    res.editMeta = (document.querySelector('.wr-card[data-item="w01"] .wr-meta') || {}).textContent || '';
+    const cbtn = document.querySelector('[data-edit-close]');
+    if (cbtn) { cbtn.click(); await sleep(200); }
+    res.editClosed = !document.querySelector('[data-editbox]');
+    res.editKeptCard = beforeEdit === 1;
+
+    /* 标完再筛：冬装应只剩刚标的那一件 */
+    const sW = document.querySelector('.wr-chip[data-f-season="winter"]');
+    if (sW) { sW.click(); await sleep(240); }
+    res.nWinter = document.querySelectorAll('.wr-card').length;
+    res.seasonOn = !!document.querySelector('.wr-chip[data-f-season="winter"].on');
+    const sA = document.querySelector('.wr-chip[data-f-season="all"]');
+    if (sA) { sA.click(); await sleep(200); }
     return res;
   })()`);
 
@@ -633,15 +685,33 @@ function check(ok, label, detail) {
   check(wr && wr.nBottom === 8, '衣橱：筛选「下装」得 8 件', `实际 ${wr && wr.nBottom}`);
   check(wr && wr.nAll === 41, '衣橱：切回「全部」恢复 41 件', `实际 ${wr && wr.nAll}`);
 
+  /* ---------- v1.11.0：包独立成类 / 季节筛选 / 就地编辑 ---------- */
+  check(wr && wr.nBag === 3, '衣橱：「包」分类里 3 件（从配饰拆出来）', `实际 ${wr && wr.nBag}`);
+  check(wr && wr.p4 === 4, '衣橱：再穿一只包 → 搭配框 4 张图（包·配饰一格）', `实际 ${wr && wr.p4}`);
+  check(wr && wr.stateBag === 'w33',
+    '衣橱：包写进独立的 outfit.bag 槽', wr ? JSON.stringify(wr.stateBag) : '无');
+  check(wr && wr.nWinterBeforeTag === 0,
+    '衣橱：未标注季节时「冬装」是空的（未标注不冒充任何一季）', `实际 ${wr && wr.nWinterBeforeTag}`);
+  check(wr && wr.editOpen === true, '衣橱：点 ✎ 就地展开编辑面板');
+  check(wr && wr.editIsInline === true, '衣橱：编辑面板不是浮层（无 dialog / body.modal-open）');
+  check(wr && wr.editKeptCard === true, '衣橱：展开编辑时卡片仍在（就地，不是被替换）');
+  check(wr && wr.editSeason === 'winter', '衣橱：改季节真的写进 state（读 select.value，不是空的无值属性）',
+    String(wr && wr.editSeason));
+  check(wr && String(wr.editMeta).indexOf('冬装') !== -1,
+    '衣橱：卡片上显示出季节标签', wr ? JSON.stringify(wr.editMeta) : '无');
+  check(wr && wr.editClosed === true, '衣橱：编辑面板可收起');
+  check(wr && wr.seasonOn === true && wr.nWinter === 1,
+    '衣橱：标了冬装后，「冬装」筛选只剩这一件', `${wr && wr.nWinter} 件`);
+
   /* ---------- 属性分组体系（v1.5.0） ---------- */
-  check(S.attrCount === 14, '属性共 14 项（3 大类）', `实际 ${S.attrCount}`);
+  check(S.attrCount === 16, '属性共 16 项（4 大类，含体温 / 总体力值 / 情绪）', `实际 ${S.attrCount}`);
   check(S.skillCount === 13, '技能共 13 项（5 大类）', `实际 ${S.skillCount}`);
-  check(S.dataVersion === 4, '数据版本为 v4（衣橱照片版迁移已完成）', `实际 v${S.dataVersion}`);
-  check(S.attrGroups === 3, '属性面板渲染 3 个分组', `实际 ${S.attrGroups} —— 为 0 说明属性面板没渲染`);
-  check(S.attrRows === 14, '属性面板渲染 14 行细刻度', `实际 ${S.attrRows}`);
-  check(S.attrNegGroups === 1, '熵值组带负向标记（.ag.neg）', `实际 ${S.attrNegGroups}`);
-  check(S.attrNegRows === 4, '负向行 4 个（熵值3 + 困倦度）', `实际 ${S.attrNegRows}`);
-  check(S.attrMidRows === 2, '双向行 2 个（社交度、稳定度）', `实际 ${S.attrMidRows}`);
+  check(S.dataVersion === 5, '数据版本为 v5（新属性 + 衣橱分类迁移已完成）', `实际 v${S.dataVersion}`);
+  check(S.attrGroups === 4, '属性面板渲染 4 个分组（生理 / 精神 / 熵 / 情绪）', `实际 ${S.attrGroups} —— 为 0 说明属性面板没渲染`);
+  check(S.attrRows === 16, '属性面板渲染 16 行细刻度', `实际 ${S.attrRows}`);
+  check(S.attrNegGroups === 2, '熵值组与情绪组都带负向标记（.ag.neg）', `实际 ${S.attrNegGroups}`);
+  check(S.attrNegRows === 5, '负向行 5 个（熵值3 + 困倦度 + 情绪/挫折感）', `实际 ${S.attrNegRows}`);
+  check(S.attrMidRows === 3, '双向行 3 个（社交度、稳定度、体温）', `实际 ${S.attrMidRows}`);
   check(S.overall !== null && S.overall > 0, 'GL.overallScore() 可用', `实际 ${S.overall}`);
   check(S.skillGroups === 5, '技能页渲染 5 个分组', `实际 ${S.skillGroups} —— 注意技能在独立 tab，需确认已渲染`);
   check(S.skillTiles === 13, '技能默认渲染成 13 个紧凑小卡（图标 + 名称 + 等级 + 经验条）', `实际 ${S.skillTiles}`);
@@ -656,7 +726,7 @@ function check(ok, label, detail) {
     `probe 到 ${S.emojiProbed} 个字符`);
 
   /* ---------- 小字照录原文 + 可编辑入口（v1.6.0） ---------- */
-  check(S.attrHasSub === 5, '属性小字渲染 5 处（原文里带括号的 5 项）', `实际 ${S.attrHasSub}`);
+  check(S.attrHasSub === 7, '属性小字渲染 7 处（原文括号 5 项 + 体温「（温度）」+ 情绪「（挫折感）」）', `实际 ${S.attrHasSub}`);
   check(S.subMove === '（活动半径）（久坐值）',
     '小字按原文照录：运动度 =「（活动半径）（久坐值）」', `实际 ${S.subMove}`);
   check(S.noteDiet === '——（少油，少盐，少糖）（地中海饮食，高蛋白）',
@@ -672,9 +742,14 @@ function check(ok, label, detail) {
   if (WANT_SHOT) {
     /* 电子衣橱面板单独出图：这是这一版的主角，必须能一眼看到搭配框 + 卡片网格。
        （顺带把懒加载的卡片图滚进视口，前面那条「已解码 N/41」的断言也靠它。） */
-    await ev(`(() => {
-      const el = document.getElementById('wardrobe-ctrl');
-      if (el) el.scrollIntoView({ block: 'start' });
+    await ev(`(async () => {
+      /* v1.11.0：衣橱是独立页签，必须**先切过去**再截图 ——
+         留在总览页时 #wardrobe-ctrl 藏在 hidden 面板里，scrollIntoView 无效，
+         拍出来会是总览页（v1.11.0 实测踩过一次，两张图一模一样）。 */
+      const t = document.querySelector('.tab[data-tab="wardrobe"]');
+      if (t) t.click();
+      await new Promise((r) => setTimeout(r, 600));
+      window.scrollTo({ top: 0 });
       return true;
     })()`);
     await new Promise((r) => setTimeout(r, 1000));
@@ -683,8 +758,15 @@ function check(ok, label, detail) {
     fs.writeFileSync(pw0, Buffer.from(sw0.data, 'base64'));
     shotPaths.push(pw0);
 
-    await ev(`window.scrollTo({ top: 0 })`);
-    await new Promise((r) => setTimeout(r, 400));
+    /* 第二张必须是总览页 —— 切回 hud，否则跟衣橱那张一模一样 */
+    await ev(`(async () => {
+      const t = document.querySelector('.tab[data-tab="hud"]');
+      if (t) t.click();
+      await new Promise((r) => setTimeout(r, 400));
+      window.scrollTo({ top: 0 });
+      return true;
+    })()`);
+    await new Promise((r) => setTimeout(r, 500));
     const s1 = await send('Page.captureScreenshot', { format: 'png' });
     const p1 = path.join(ROOT, 'tools', 'browser-shot-full.png');
     fs.writeFileSync(p1, Buffer.from(s1.data, 'base64'));
@@ -941,7 +1023,7 @@ function check(ok, label, detail) {
     };
     out.noteNeg = await noteAfterOpen('drowse');   // 困倦度：neg
     out.noteMid = await noteAfterOpen('social');   // 社交度：mid
-    out.notePos = await noteAfterOpen('mood');     // 情绪值：pos
+    out.notePos = await noteAfterOpen('throat');   // 喉咙：pos（v1.11.0 起情绪值改成 neg，取样点换成喉咙）
     // 收起微调条，避免影响后续
     if (pick('.ag-row[data-aid="mood"]')) { pick('.ag-row[data-aid="mood"]').click(); await sleep(300); }
 
@@ -1310,7 +1392,7 @@ function check(ok, label, detail) {
       '手机：标签栏贴底悬浮（含安全区留白）', `距底 ${mob.sideGapBottom}px`);
     check(mob.sideW !== null && mob.sideW >= mob.vw - 32,
       '手机：标签栏横向铺开，不是窄条', `${mob.sideW}px / 视口 ${mob.vw}px`);
-    check(mob.tabCount === 4, '手机：4 个页签全部保留', `实际 ${mob.tabCount}`);
+    check(mob.tabCount === 5, '手机：5 个页签全部保留且均分', `实际 ${mob.tabCount}`);
     check(mob.tabMinH >= 44,
       '手机：页签触摸目标 ≥ 44px（手指点得中）', `最矮 ${mob.tabMinH}px`);
     check(mob.brandHidden === true && mob.footHidden === true,

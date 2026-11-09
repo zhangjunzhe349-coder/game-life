@@ -36,6 +36,10 @@
     { id: 'mental', name: '精神力', emoji: '🧠', note: '心理状态' },
     /* 组注按原文照录（原文：==熵值==（此项过高暂没法做高集中的事）） */
     { id: 'entropy', name: '熵值', emoji: '🌀', note: '（此项过高暂没法做高集中的事）' },
+    /* v1.11.0 新增第四组：用户要求「情绪值（挫折感）这个单开一个大体系」。
+       它原属「精神力」，但挫折感是负向指标（越低越好），混在正向组里
+       会把组均值读反 —— 单列一组，配色与刻度方向都独立。 */
+    { id: 'emotion', name: '情绪', emoji: '💢', note: '挫折感 · 越低越好' },
   ];
 
   const SKILL_GROUPS = [
@@ -50,7 +54,7 @@
   GL.SKILL_GROUPS = SKILL_GROUPS;
 
   /* ============================================================
-     属性项定义：[key, 显示名, 小字注解, 组, 极性, 说明]
+     属性项定义：[key, 显示名, 小字注解, 组, 极性, 说明, 扩展]
      ------------------------------------------------------------
      ⚠ 小字注解（sub）与说明（note）**逐字照录**用户提供的【游戏人生(属性篇)】原文
        —— 全角括号、破折号、标点一律保留，不得改写、精简或合并。
@@ -58,6 +62,14 @@
      原文结构 → 字段的对应关系：
        「运动度（活动半径）（久坐值）」        → name「运动度」 sub「（活动半径）（久坐值）」
        「运动度」下面 `` ——待家里会头晕 ``    → note「——待家里会头晕」
+
+     扩展（第 7 项，可省略）：
+       unit  显示单位，如 '℃'（值仍是原始数值，不做换算）
+       ideal 理想区间 [lo, hi] —— 落进去算满分，偏离按距离扣分。
+             **这是「体温从底层影响状态」的实现**：36.5 在 35~41 的量程里
+             只占 25%，若直接用百分比算综合分，一个体温正常的人会被判成 25 分。
+             有 ideal 的项改按「离理想区间的距离」评分（见 GL.attrScore）。
+       levels 覆盖默认等级文案（区间不是 0~100 时必须给，否则等级会错位）
      ============================================================ */
   const ATTR_DEFS = [
     ['throat', '喉咙', '（咽部）', 'physio', 'pos', ''],
@@ -66,9 +78,33 @@
     ['move', '运动度', '（活动半径）（久坐值）', 'physio', 'pos', '——待家里会头晕'],
     ['sleep', '睡眠', '（早睡早起值）', 'physio', 'pos', '——起的越晚，越累'],
     ['diet', '饮食', '', 'physio', 'pos', '——（少油，少盐，少糖）（地中海饮食，高蛋白）'],
+    /* v1.11.0 用户新增：「温度(体温) 直接从底层影响状态」。真实体温 35~41℃，
+       正常区间 36.1~37.2 记满分，发烧按偏离程度扣 —— 所以它同时进「电量」与综合分。 */
+    ['temp', '体温', '（温度）', 'physio', 'mid', '', {
+      unit: '℃', ideal: [36.1, 37.2], min: 35, max: 41, start: 36.5, step: 0.1,
+      levels: [
+        { min: 39, label: '🚨 高烧' },
+        { min: 38, label: '🤒 发烧' },
+        { min: 37.3, label: '😣 偏高' },
+        { min: 36.1, label: '😊 正常' },
+        { min: 35.6, label: '🥶 偏低' },
+        { min: -999, label: '🚨 过低' },
+      ],
+    }],
+    /* v1.11.0 用户新增：「总体力值 —— 像运动员一样客观评估当下的体力。
+       体力不够就不要做高强度的事，一定要重视休息和恢复」。
+       区间沿用 0~100 打分制；等级文案专为「能不能上强度」而写，不用通用夸奖词。 */
+    ['stamina', '总体力值', '', 'physio', 'pos', '——体力不够就不要做高强度的事，一定要重视休息和恢复', {
+      levels: [
+        { min: 85, label: '🔥 满油 · 可上强度' },
+        { min: 65, label: '💪 充足 · 正常训练' },
+        { min: 45, label: '🚶 一般 · 减量' },
+        { min: 25, label: '🛌 偏低 · 只做恢复' },
+        { min: -999, label: '😵 耗尽 · 立刻休息' },
+      ],
+    }],
 
     ['desire', '欲望值', '（动力感）', 'mental', 'pos', ''],
-    ['mood', '情绪值', '', 'mental', 'pos', ''],
     ['social', '社交度', '', 'mental', 'mid', '——(环境能量)(内外倾高低能都需要)——(过低生理级不适)——还决定了你的眼界，高质量圈子带来的信息交换会逼着人成长'],
     ['stable', '稳定度', '', 'mental', 'mid', '——(过低→生活变动大)(会打断很多系统习惯)（过高日复一日又会陷入麻木）'],
     ['hope', '盼头值', '', 'mental', 'pos', '——生活有没有一个盼头'],
@@ -76,6 +112,10 @@
     ['dopamine', '多巴胺需求', '', 'entropy', 'neg', '—→(阈值)←(过高破坏系统性动作)'],
     ['chaos', '混乱值', '', 'entropy', 'neg', '——★熵★(信息接收数量和频次)，做选择次数，刷视频'],
     ['noise', '嘈杂值', '', 'entropy', 'neg', '——周围的声音，反独处心境，待家里就高\n——嘈杂值过高，失去自我。'],
+
+    /* v1.11.0：情绪值从「精神力」搬到独立的「情绪」组，语义改为挫折感（负向）。
+       老数据的 value 会在 v5 迁移里取反（正向心情 60 → 挫折感 40）。 */
+    ['mood', '情绪值', '（挫折感）', 'emotion', 'neg', ''],
   ];
 
   /* 技能项定义：[key, 显示名, 小字注解, emoji, 组, 行动库, 说明]
@@ -124,16 +164,25 @@
 
   /* 初始值跟着极性走：负向指标（熵值、困倦度）的「好状态」是低值，
      若一律给 60，新用户打开会看到一条红色长条，误以为状态很糟。
-     pos 60（中等偏上）/ neg 30（偏清爽）/ mid 55（贴近理想区间） */
+     pos 60（中等偏上）/ neg 30（偏清爽）/ mid 55（贴近理想区间）
+     例外：区间不是 0~100 的项（体温）用 extra.start 给真实初值。 */
   const START_VALUE = { pos: 60, neg: 30, mid: 55 };
 
   function docAttributes() {
-    return ATTR_DEFS.map(([key, name, sub, group, polarity, note]) => ({
-      id: key, name, sub: sub || '', note: note || '', group, polarity,
-      min: 0, max: 100,
-      value: START_VALUE[polarity] !== undefined ? START_VALUE[polarity] : 60,
-      levels: (LEVELS[polarity] || LEVELS.pos)(), history: []
-    }));
+    return ATTR_DEFS.map(([key, name, sub, group, polarity, note, extra]) => {
+      const ex = extra || {};
+      return {
+        id: key, name, sub: sub || '', note: note || '', group, polarity,
+        min: ex.min !== undefined ? ex.min : 0,
+        max: ex.max !== undefined ? ex.max : 100,
+        value: ex.start !== undefined ? ex.start
+          : (START_VALUE[polarity] !== undefined ? START_VALUE[polarity] : 60),
+        unit: ex.unit || '',
+        ideal: ex.ideal || null,
+        step: ex.step || 1,
+        levels: ex.levels || (LEVELS[polarity] || LEVELS.pos)(), history: []
+      };
+    });
   }
 
   /* 供属性面板在切换刻度语义时同步等级文案 */
@@ -228,13 +277,13 @@
 
   function defaults() {
     return {
-      version: 4,
+      version: 5,
       ui: { attrCollapsed: [] },
       avatar: {
         height: 175, weight: 68, muscle: 50,
         skin: '#e8b088', hairStyle: 'short', hairColor: '#2b2118',
         wardrobe: wardrobeLib(),
-        outfit: { top: null, bottom: null, shoes: null, accessory: null },
+        outfit: { top: null, bottom: null, shoes: null, bag: null, accessory: null },
         outfits: [],
         legacyWardrobe: []
       },
@@ -250,11 +299,14 @@
   }
 
   /* 衣橱单品库来自构建产物 js/wardrobe-data.js（由 tools/build-wardrobe.py 生成）。
-     UI 只消费不硬编码 —— 加衣服 = 重跑那个脚本，不用改任何 JS。 */
+     UI 只消费不硬编码 —— 加衣服 = 重跑那个脚本，不用改任何 JS。
+     season / year 是**用户自己标的**（买入年份、冬夏），生成器不知道，所以默认 null，
+     由衣橱页的就地编辑写入 GL.state.avatar.wardrobe —— 后端重建清单也不会冲掉。 */
   function wardrobeLib() {
     return (GL.WARDROBE_LIB || []).map((it) => ({
       id: it.id, name: it.name, slot: it.slot, cat: it.cat,
-      color: it.color, box: it.box, img: it.img
+      color: it.color, box: it.box, img: it.img,
+      season: it.season || null, year: it.year || null
     }));
   }
 
@@ -361,12 +413,81 @@
         + '已留档到 avatar.legacyWardrobe，不再展示：', kept.map((w) => w.name).join('、'));
     }
     a.wardrobe = wardrobeLib();
-    a.outfit = { top: null, bottom: null, shoes: null, accessory: null };
+    a.outfit = { top: null, bottom: null, shoes: null, bag: null, accessory: null };
     a.outfits = (Array.isArray(a.outfits) ? a.outfits : []).map((o) => ({
       id: o.id, name: o.name,
-      slots: { top: null, bottom: null, shoes: null, accessory: null }
+      slots: { top: null, bottom: null, shoes: null, bag: null, accessory: null }
     }));
     GL.state.version = 4;
+  }
+
+  /* ============================================================
+     v4 → v5 迁移（v1.11.0）：三个新属性 + 情绪单列 + 衣橱分类重整
+     ------------------------------------------------------------
+     用户原话：「新增的几个属性……两个归入原先的三大体系（温度/体温、
+     总体力值），情绪值（挫折感）这个单开一个大体系」；
+     「电子衣橱……上衣/下装/鞋/包/配饰五个栏目」。
+
+     为什么必须写迁移：`merge(defaults(), data)` 对**数组**是整体替换，
+     不是逐项合并 —— 也就是说老用户的 attributes / wardrobe 会原样盖掉
+     defaults 里的新增项。不显式补，老用户升级后根本看不到这三项。
+
+     三条规则：
+       ① 缺哪项补哪项（按固定 id 判），**已有的绝不覆盖** —— 用户打的分、
+          改过的名字与区间必须原样保留。
+       ② 情绪值：从 mental 搬到 emotion 组，语义从「越高越好」翻成
+          「挫折感越高越差」→ **极性 neg，当前值与历史值一并取反**
+          （正向心情 60 = 挫折感 40）。不取反会让人打开就看到一条红色长条。
+       ③ 包：内置 w33 / w34 / w35 原本塞在 accessory 里（构建脚本的 cat
+          已经是 bag），这里把 slot 一并改成 bag，否则新页面多出一个
+          「包」分类却永远是空的。
+     ============================================================ */
+  const V5_NEW_ATTR_IDS = ['temp', 'stamina'];
+  const V5_SLOT_FIX = { w33: 'bag', w34: 'bag', w35: 'bag' };
+
+  function migrateV4toV5() {
+    const have = {};
+    (GL.state.attributes || []).forEach((a) => { if (a) have[a.id] = a; });
+
+    /* ① 补齐新增的内置属性（顺序按定义表，追加在组末） */
+    const docMap = {};
+    docAttributes().forEach((a) => { docMap[a.id] = a; });
+    V5_NEW_ATTR_IDS.forEach((id) => {
+      if (!have[id] && docMap[id]) {
+        GL.state.attributes.push(docMap[id]);
+        have[id] = docMap[id];
+      }
+    });
+
+    /* ② 情绪值单列：组 / 语义 / 值取反。历史值同样取反，趋势图方向才对的。 */
+    const mood = have.mood;
+    if (mood && mood.group !== 'emotion') {
+      mood.group = 'emotion';
+      mood.name = '情绪值';
+      mood.sub = '（挫折感）';
+      mood.polarity = 'neg';
+      mood.value = Math.round(100 - mood.value);
+      (mood.history || []).forEach((h) => { h.v = Math.round(100 - h.v); });
+      mood.levels = (LEVELS.neg)();
+    }
+
+    /* ③ 衣橱：包独立成类 + 每件补 season / year 两个编辑字段 */
+    const av = GL.state.avatar || (GL.state.avatar = {});
+    const lib = {};
+    wardrobeLib().forEach((it) => { lib[it.id] = it; });
+    (av.wardrobe || []).forEach((w) => {
+      if (!w) return;
+      if (V5_SLOT_FIX[w.id] && lib[w.id]) w.slot = V5_SLOT_FIX[w.id];
+      if (w.season === undefined) w.season = null;   // 'summer' | 'winter' | 'all'
+      if (w.year === undefined) w.year = null;       // 买入年份，如 2023
+    });
+    if (!av.outfit || typeof av.outfit !== 'object') av.outfit = {};
+    if (av.outfit.bag === undefined) av.outfit.bag = null;
+    (av.outfits || []).forEach((o) => {
+      if (o && o.slots && o.slots.bag === undefined) o.slots.bag = null;
+    });
+
+    GL.state.version = 5;
   }
 
   /* ---------- 内置技能的 emoji 重同步（v1.8.2） ----------
@@ -397,6 +518,7 @@
       if (prevVer < 2) migrateV1toV2(data);
       if (prevVer < 3) migrateV2toV3();
       if (prevVer < 4) migrateV3toV4();
+      if (prevVer < 5) migrateV4toV5();
       if (!GL.state.ui || !Array.isArray(GL.state.ui.attrCollapsed)) GL.state.ui = { attrCollapsed: [] };
     }
     resyncBuiltinEmoji();
@@ -608,10 +730,26 @@
 
   /* 组均值：显示**原始水平**（条长 = 实际值）。
      不在这里反转负向项 —— 熵值 30 就该显示成 30% 的短条，
-     配合红色与「越低越好」标签，语义已经清楚。 */
-  const pctOf = (a) => {
+     配合红色与「越低越好」标签，语义已经清楚。
+
+     ⚠ 例外：有 `ideal` 的项（体温）不能按量程算 ——
+     36.5℃ 在 35~41 里只占 25%，会把「生理值」组标题凭空拉低 9 分，
+     与顶栏电量（按健康度算）对不上。这类项改按「离理想区间多远」算。 */
+  const rangePct = (a) => {
     const lo = a.min, hi = Math.max(a.max, a.min + 1);
     return Math.max(0, Math.min(100, ((a.value - lo) / (hi - lo)) * 100));
+  };
+
+  const pctOf = (a) => {
+    if (Array.isArray(a.ideal) && a.ideal.length === 2) {
+      const lo = a.ideal[0], hi = a.ideal[1];
+      if (a.value >= lo && a.value <= hi) return 100;
+      const below = a.value < lo;
+      const span = Math.max(below ? lo - a.min : a.max - hi, 0.01);
+      const off = below ? lo - a.value : a.value - hi;
+      return Math.max(0, 100 - (off / span) * 100);
+    }
+    return rangePct(a);
   };
 
   GL.groupMean = function (items) {
@@ -623,8 +761,24 @@
      否则「熵值低（这是好事）」会算成低分，读起来像状态变差了 ——
      这是负向指标最容易踩的统计陷阱。
      顶栏「电量」与总览分都建立在它之上，保证两处口径完全一致
-     （v1.8.2 起抽出来公用，别再各写一份）。 */
-  GL.attrScore = (a) => (a.polarity === 'neg' ? 100 - pctOf(a) : pctOf(a));
+     （v1.8.2 起抽出来公用，别再各写一份）。
+
+     v1.11.0 起支持 `ideal`（理想区间）：体温这类**量程不是 0~100** 的项，
+     直接按百分比算会把「36.5℃ 正常」算成 (36.5-35)/(41-35)=25 分。
+     有 ideal 时改成「落进区间就是 100 分，偏离按距离扣到 0」——
+     用户要的「体温直接从底层影响状态」就落在这里。 */
+  GL.attrScore = (a) => {
+    if (Array.isArray(a.ideal) && a.ideal.length === 2) return Math.round(pctOf(a));
+    return a.polarity === 'neg' ? 100 - pctOf(a) : pctOf(a);
+  };
+
+  /* 刻度条长度：有 ideal 的项同样按「健康度」画 ——
+     否则体温正常（36.5）会画成一条只填 25% 的短条，而旁边写着「😊 正常」，
+     自相矛盾。数字仍显示真实值（带单位），条长表示状态好坏。 */
+  GL.attrBarPct = (a) => {
+    if (Array.isArray(a.ideal) && a.ideal.length === 2) return GL.attrScore(a);
+    return pctOf(a);
+  };
 
   /* 某一分组的平均状态（同样按极性反转）。
      顶栏「电量」取的是生理值组 physio —— 用户原话：

@@ -33,6 +33,7 @@
     <nav class="tabs" id="tabs" aria-label="主导航">
       <button class="tab active" data-tab="hud"><span class="ico">⚡</span><span>总览</span></button>
       <button class="tab" data-tab="skills"><span class="ico">🎯</span><span>技能</span></button>
+      <button class="tab" data-tab="wardrobe"><span class="ico">👗</span><span>衣橱</span></button>
       <button class="tab" data-tab="life"><span class="ico">⏳</span><span>生命</span></button>
       <button class="tab" data-tab="settings"><span class="ico">⚙️</span><span>设置</span></button>
     </nav>
@@ -65,18 +66,23 @@
         <section class="wing rv" data-d="4" id="wing-body" aria-label="生理状态"></section>
       </div>
 
-      <!-- 电子衣橱：原先挂在立绘下方，立绘移除后改为整宽展开（卡片网格需要横向空间） -->
-      <div class="wardrobe-block rv" data-d="5">
-        <div class="ctrl-toggle">
-          <button class="btn mini" id="ctrl-toggle" aria-expanded="false">👗 电子衣橱</button>
-        </div>
-        <div id="avatar-panel" hidden>
-          <div id="wardrobe-ctrl"></div>
-        </div>
-      </div>
+      <!-- 电子衣橱 v1.11.0 起独立成页（原先是这里的折叠块）。
+           用户要求：「底部的四个总栏目现在新增一个电子衣橱的页面」——
+           它需要整宽网格，挤在总览里永远是「点开才看得见」的附属品。 -->
     </section>
 
     <section class="panel" id="panel-skills" hidden></section>
+
+    <section class="panel" id="panel-wardrobe" hidden>
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">电子衣橱</span>
+          <span class="card-hint">点卡片穿 / 脱 · 右上角 ✎ 编辑季节与年份</span>
+        </div>
+        <div id="wardrobe-ctrl"></div>
+      </div>
+    </section>
+
     <section class="panel" id="panel-life" hidden></section>
     <section class="panel" id="panel-settings" hidden></section>
 
