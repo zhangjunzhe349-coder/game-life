@@ -361,6 +361,22 @@ if (/class="wr-addbox"/.test(wardrobeJs) && !/role="dialog"/.test(wardrobeJs)
   problems.push('衣橱添加面板退化成了浮层（出现 dialog / modal-open），与「不要浮窗」的既定要求冲突');
 }
 
+const storageJs = fs.readFileSync(path.join(ROOT, 'js', 'storage.js'), 'utf8');
+const wDel = [
+  [/data-edit-del="\$\{it\.id\}"/, wardrobeJs, '编辑面板对所有单品都给「删除」'],
+  [/function isBuiltin/, wardrobeJs, '辨别内置件（决定是否留墓碑）'],
+  [/a\.outfit\[k\] === id/, wardrobeJs, '删除时清掉搭配框里的引用'],
+  [/data-restore-builtin/, wardrobeJs, '「恢复已删 N 件」入口'],
+  [/wardrobeRemoved:\s*\[\]/, storageJs, '默认数据带墓碑清单'],
+  [/!gone\[it\.id\]/, storageJs, '重同步跳过被删的内置件'],
+];
+const wDelMiss = wDel.filter(([re, hay]) => !re.test(hay)).map(([, , label]) => label);
+if (!wDelMiss.length) {
+  ok.push('衣橱：删除单品整条链齐全（所有件可删 / 内置件留墓碑 / 重同步跳过墓碑 / 可恢复 / 清搭配引用）');
+} else {
+  problems.push(`衣橱「删除单品」缺环：${wDelMiss.join('、')}`);
+}
+
 const tabCount = (html.match(/data-tab="/g) || []).length;
 if (tabCount === 5 && /data-tab="wardrobe"/.test(html)) {
   ok.push('底部导航 5 个页签（总览 / 技能 / 衣橱 / 生命 / 设置）');
@@ -369,7 +385,7 @@ if (tabCount === 5 && /data-tab="wardrobe"/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 24;   // v1.13.0：衣橱「＋ 添加单品」（上传透明底 PNG 入橱）；前几轮：v18 技能就地展开 → v19 检查更新 → v20 每日必做 → v21 检查更新双判据 → v22 三项新属性+衣橱独立页 → v23 衣橱追加 5 件花底抠图；每轮都动了 js 或数据清单，资源有变就必须抬到同值
+const MIN_SW_VER = 25;   // v1.14.0：衣橱删除单品（内置件留墓碑 / 可恢复）；前几轮：v18 技能就地展开 → v19 检查更新 → v20 每日必做 → v21 检查更新双判据 → v22 三项新属性+衣橱独立页 → v23 衣橱追加 5 件花底抠图 → v24 衣橱「＋ 添加单品」；每轮都动了 js 或数据清单，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

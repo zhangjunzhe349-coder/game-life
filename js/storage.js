@@ -283,6 +283,10 @@
         height: 175, weight: 68, muscle: 50,
         skin: '#e8b088', hairStyle: 'short', hairColor: '#2b2118',
         wardrobe: wardrobeLib(),
+        /* v1.14.0：被用户删掉的内置单品 id 清单（wNN）。
+           内置件由 resyncBuiltinWardrobe() 自动补齐，光从数组里删是「删了会回来」，
+           所以要留一份墓碑，重同步时跳过它们。自建件（u 前缀）不进这里。 */
+        wardrobeRemoved: [],
         outfit: { top: null, bottom: null, shoes: null, bag: null, accessory: null },
         outfits: [],
         legacyWardrobe: []
@@ -513,13 +517,22 @@
      （w42–w46，花底照片抠图）老用户的数据里不会有。像 resyncBuiltinEmoji 一样
      幂等补齐：只追加缺的 id（按清单顺序排在末尾），**绝不碰已有项** ——
      用户改过的名字 / 季节 / 年份 / 穿着状态原样保留。schema 没变，不引版本迁移。 */
+  /* 把内置单品补进用户数据里（只补缺的 id，不碰已有条目的名字 / 季节 / 年份 / 穿着）。
+     v1.14.0 起要尊重「用户主动删除」：avatar.wardrobeRemoved 里的 id 不补，
+     否则删掉的内置件下次打开又会冒出来 —— 那按钮就成了骗人的。 */
   function resyncBuiltinWardrobe() {
     const av = GL.state.avatar || (GL.state.avatar = {});
     if (!Array.isArray(av.wardrobe)) av.wardrobe = wardrobeLib();
+    if (!Array.isArray(av.wardrobeRemoved)) av.wardrobeRemoved = [];
+    const gone = {};
+    av.wardrobeRemoved.forEach((id) => { if (id) gone[id] = true; });
     const have = {};
     av.wardrobe.forEach((w) => { if (w && w.id) have[w.id] = true; });
-    wardrobeLib().forEach((it) => { if (!have[it.id]) av.wardrobe.push(it); });
+    wardrobeLib().forEach((it) => {
+      if (!have[it.id] && !gone[it.id]) av.wardrobe.push(it);
+    });
   }
+  GL.resyncBuiltinWardrobe = resyncBuiltinWardrobe;
 
   GL.load = function () {
     let data = null;

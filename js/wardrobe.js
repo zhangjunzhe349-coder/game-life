@@ -258,15 +258,16 @@
     const thisYear = new Date().getFullYear();
     const yearOpts = [['', '未填']];
     for (let y = thisYear; y >= thisYear - 20; y--) yearOpts.push([String(y), String(y)]);
-    /* 自己加的单品（id 以 u 开头）才给「删除」—— 内置件删了下次加载也会被
-       resyncBuiltinWardrobe() 补回来，给个按钮纯属骗人。 */
-    const own = String(it.id).charAt(0) === 'u';
+    /* v1.14.0：**所有单品都能删**（之前只给自建件）。
+       内置件不是「删不掉」，而是删了会被 resyncBuiltinWardrobe() 补回来 ——
+       所以删除内置件时要同时在 avatar.wardrobeRemoved 里留一块墓碑，
+       重同步才不会再塞回来；要找回就走网格上方「恢复已删除的内置单品」。 */
     return `
       <div class="wr-editbox" data-editbox="${it.id}">
         <div class="wr-eb-head">
           <span class="wr-eb-title">编辑单品</span>
           <span class="wr-eb-tools">
-            ${own ? `<button class="btn mini" type="button" data-edit-del="${it.id}">删除</button>` : ''}
+            <button class="btn mini danger" type="button" data-edit-del="${it.id}">删除</button>
             <button class="btn mini" type="button" data-edit-close>收起</button>
           </span>
         </div>
@@ -404,6 +405,10 @@
           ${editorHTML(editing)}
           <div class="wr-tools">
             <button class="wr-add${adding ? ' on' : ''}" type="button" data-add-open>＋ 添加单品</button>
+            ${removedIds().length
+              ? `<button class="wr-restore" type="button" data-restore-builtin
+                   title="把删掉的内置单品重新放回衣橱">↺ 恢复已删 ${removedIds().length} 件</button>`
+              : ''}
             <span class="wr-count">${items.length} 件符合筛选</span>
           </div>
           <div class="wr-cats">
@@ -513,17 +518,52 @@
     GL.toast('已加入衣橱「' + added + '」', 'ok');
   }
 
+  /* 内置件 = 清单里有同 id 的件（wNN）；自建件是 u 前缀，清单里永远没有 */
+  function isBuiltin(id) {
+    return (GL.WARDROBE_LIB || []).some((it) => it.id === id);
+  }
+
+  function removedIds() {
+    const a = A();
+    if (!Array.isArray(a.wardrobeRemoved)) a.wardrobeRemoved = [];
+    return a.wardrobeRemoved;
+  }
+
   function removeItem(id) {
     const it = itemOf(id);
     if (!it) return;
-    if (!confirm('删除「' + it.name + '」？这张图会一起从本机删掉，撤不回来。')) return;
+    const builtin = isBuiltin(id);
+    const msg = builtin
+      ? '删除「' + it.name + '」？\n\n它是内置单品，删掉后可以用网格上方的「恢复已删除的内置单品」找回来。'
+      : '删除「' + it.name + '」？这张图会一起从本机删掉，撤不回来。';
+    if (!confirm(msg)) return;
+
     const a = A();
     a.wardrobe = a.wardrobe.filter((w) => w.id !== id);
+    /* 内置件留墓碑，重同步才不会再补回来（自建件不需要，清单里本来就没有） */
+    if (builtin) {
+      const gone = removedIds();
+      if (gone.indexOf(id) === -1) gone.push(id);
+    }
     Object.keys(a.outfit || {}).forEach((k) => { if (a.outfit[k] === id) a.outfit[k] = null; });
     if (editingId === id) editingId = null;
     GL.save();
     render();
-    GL.toast('已删除「' + it.name + '」');
+    GL.toast(builtin ? '已删除「' + it.name + '」（可恢复）' : '已删除「' + it.name + '」');
+  }
+
+  /* 恢复所有被删掉的内置单品：清墓碑 → 重同步补齐 → 回到「全部」筛选看结果 */
+  function restoreBuiltin() {
+    const a = A();
+    const gone = removedIds();
+    if (!gone.length) return;
+    const n = gone.length;
+    a.wardrobeRemoved = [];
+    GL.resyncBuiltinWardrobe();
+    cat = 'all'; season = 'all'; year = 'all';
+    GL.save();
+    render();
+    GL.toast('已恢复 ' + n + ' 件内置单品', 'ok');
   }
 
   /* ---------- 事件 ---------- */
@@ -554,6 +594,7 @@
         return;
       }
       if (e.target.closest('[data-add-save]')) { saveNew(); return; }
+      if (e.target.closest('[data-restore-builtin]')) { restoreBuiltin(); return; }
       const del = e.target.closest('[data-edit-del]');
       if (del) { removeItem(del.dataset.editDel); return; }
 

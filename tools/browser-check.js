@@ -811,12 +811,32 @@ function check(ok, label, detail) {
     res.afterDel = window.GL.state.avatar.wardrobe.length;
     res.ownGone = !window.GL.state.avatar.wardrobe.some((w) => String(w.id).charAt(0) === 'u');
 
-    /* 内置件**不该**有删除按钮（删了下次加载也会被重同步补回来，等于骗人） */
+    /* ⑥ v1.14.0：内置件也能删 —— 删完必须留墓碑，重载不许复活，然后能一键恢复 */
+    res.builtinDelBtn = false;
     const b = document.querySelector('.wr-edit[data-edit="w02"]');
-    if (b) { b.click(); await sleep(220); }
-    res.builtinNoDel = !document.querySelector('[data-edit-del]');
-    const cb = document.querySelector('[data-edit-close]');
-    if (cb) { cb.click(); await sleep(200); }
+    if (b) { b.click(); await sleep(250); }
+    res.builtinDelBtn = !!document.querySelector('[data-edit-del="w02"]');
+    window.confirm = () => true;
+    const bd = document.querySelector('[data-edit-del="w02"]');
+    if (bd) { bd.click(); await sleep(400); }
+    window.confirm = realConfirm;
+    res.afterBuiltinDel = window.GL.state.avatar.wardrobe.length;
+    res.w02Gone = !window.GL.state.avatar.wardrobe.some((w) => w.id === 'w02');
+    res.tombstone = (window.GL.state.avatar.wardrobeRemoved || []).indexOf('w02') !== -1;
+
+    /* 重载：resyncBuiltinWardrobe() 必须尊重墓碑，不能把它塞回来 */
+    window.GL.load();
+    window.GL.renderWardrobe();
+    await sleep(320);
+    res.w02StayedGone = !window.GL.state.avatar.wardrobe.some((w) => w.id === 'w02');
+    const rb = document.querySelector('[data-restore-builtin]');
+    res.restoreBtn = !!rb;
+    res.restoreLabel = rb ? rb.textContent.replace(/\s+/g, ' ').trim() : '';
+    if (rb) { rb.click(); await sleep(450); }
+    res.restored = window.GL.state.avatar.wardrobe.some((w) => w.id === 'w02');
+    res.afterRestore = window.GL.state.avatar.wardrobe.length;
+    res.tombCleared = (window.GL.state.avatar.wardrobeRemoved || []).length === 0;
+    res.restoreBtnGone = !document.querySelector('[data-restore-builtin]');
     return res;
   })()`);
 
@@ -843,7 +863,18 @@ function check(ok, label, detail) {
   check(addw && addw.hasDel === true && addw.ownGone === true && addw.afterDel === addw.before,
     '衣橱：自建单品可删除，删完回到添加前的件数',
     addw ? `${addw.after} → ${addw.afterDel}` : '无');
-  check(addw && addw.builtinNoDel === true, '衣橱：内置件没有删除按钮（删了也会被重同步补回来）');
+  check(addw && addw.builtinDelBtn === true && addw.w02Gone === true,
+    '衣橱：内置件也能删除（编辑面板有「删除」，删完从 state 消失）',
+    addw ? `${addw.afterBuiltinDel} 件` : '无');
+  check(addw && addw.tombstone === true, '衣橱：删内置件时留了墓碑（wardrobeRemoved 里记下 w02）');
+  check(addw && addw.w02StayedGone === true,
+    '衣橱：重新加载后删掉的内置件没有复活（重同步尊重墓碑）');
+  check(addw && addw.restoreBtn === true && /恢复已删 1 件/.test(addw.restoreLabel || ''),
+    '衣橱：删过内置件后出现「恢复已删 N 件」入口', addw ? addw.restoreLabel : '无');
+  check(addw && addw.restored === true && addw.afterRestore === addw.before
+      && addw.tombCleared === true && addw.restoreBtnGone === true,
+    '衣橱：点恢复后 w02 回来了、墓碑清空、恢复入口自动收起',
+    addw ? `${addw.afterBuiltinDel} → ${addw.afterRestore}` : '无');
 
   /* ---------- 属性分组体系（v1.5.0） ---------- */
   check(S.attrCount === 16, '属性共 16 项（4 大类，含体温 / 总体力值 / 情绪）', `实际 ${S.attrCount}`);
@@ -926,6 +957,38 @@ function check(ok, label, detail) {
     }
     await ev(`(() => {
       const c = document.querySelector('[data-add-close]');
+      if (c) c.click();
+      return true;
+    })()`);
+    await new Promise((r) => setTimeout(r, 300));
+
+    /* v1.14.0：编辑面板的「删除」按钮单独出图（所有单品都有，包括内置件）。
+       用 w02 的 ✎ 打开 → 面板就地展开 → 截面板区域 → 收起。 */
+    const rDel = await ev(`(async () => {
+      const b = document.querySelector('.wr-edit[data-edit="w02"]');
+      if (b) { b.click(); await new Promise((r) => setTimeout(r, 320)); }
+      const box = document.querySelector('.wr-editbox');
+      if (!box) return null;
+      box.scrollIntoView({ block: 'center' });
+      await new Promise((r) => setTimeout(r, 300));
+      const r = box.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height,
+        hasDel: !!box.querySelector('[data-edit-del="w02"]') };
+    })()`);
+    if (rDel && rDel.w > 100) {
+      const sDel = await send('Page.captureScreenshot', {
+        format: 'png',
+        clip: {
+          x: Math.max(0, rDel.x - 12), y: Math.max(0, rDel.y - 12),
+          width: rDel.w + 24, height: rDel.h + 24, scale: 1.6
+        },
+      });
+      const pDel = path.join(ROOT, 'tools', 'browser-shot-wardrobe-del.png');
+      fs.writeFileSync(pDel, Buffer.from(sDel.data, 'base64'));
+      shotPaths.push(pDel);
+    }
+    await ev(`(() => {
+      const c = document.querySelector('[data-edit-close]');
       if (c) c.click();
       return true;
     })()`);

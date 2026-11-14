@@ -834,6 +834,16 @@ b { font-weight: 700; }
   transition: all var(--dur-fast) ease-out;
 }
 .wr-add:hover, .wr-add.on { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+/* v1.14.0：删过内置件才会出现的找回入口（跟「＋ 添加单品」同排，虚线弱化） */
+.wr-restore {
+  display: inline-flex; align-items: center;
+  min-height: 30px; padding: 0 var(--s3);
+  border-radius: var(--r-pill); border: 1px dashed var(--line-strong);
+  background: transparent; color: var(--faint);
+  font-size: var(--fs-2xs); letter-spacing: 0.06em; cursor: pointer;
+  transition: all var(--dur-fast) ease-out;
+}
+.wr-restore:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
 
 .wr-addbox {
   display: flex; flex-direction: column; gap: var(--s2);

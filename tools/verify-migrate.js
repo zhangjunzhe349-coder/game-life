@@ -330,6 +330,32 @@ const v3State = {
     '重同步：重复 load 幂等（不会重复追加）');
 }
 
+/* ============ 用例 6.6：删除内置单品与墓碑（v1.14.0） ============
+   用户删掉内置件后，重同步（load / 导入备份）不许把它补回来 ——
+   否则「删除」按钮就是骗人的。墓碑只记在 avatar.wardrobeRemoved，
+   自建件（u 前缀）删了不需要墓碑（内置清单里本来就没有它）。 */
+{
+  const { GL, store } = boot();
+  GL.load();
+  const seeded = JSON.parse(JSON.stringify(GL.state));
+  check(Array.isArray(seeded.avatar.wardrobeRemoved),
+    '删除：默认数据带 wardrobeRemoved 墓碑清单（老数据 merge 后也不缺）');
+  seeded.avatar.wardrobe = seeded.avatar.wardrobe.filter((w) => w.id !== 'w02');
+  seeded.avatar.wardrobeRemoved = ['w02'];
+  store['gamelife_state_v1'] = JSON.stringify(seeded);
+
+  GL.load();
+  const ids = GL.state.avatar.wardrobe.map((w) => w.id);
+  check(ids.indexOf('w02') === -1 && GL.state.avatar.wardrobe.length === 45,
+    '删除：重同步尊重墓碑，删掉的 w02 没有偷偷补回来',
+    '实际 ' + GL.state.avatar.wardrobe.length + ' 件');
+  GL.state.avatar.wardrobeRemoved = [];
+  GL.resyncBuiltinWardrobe();
+  check(GL.state.avatar.wardrobe.length === 46
+    && GL.state.avatar.wardrobe.some((w) => w.id === 'w02'),
+    '删除：清墓碑后重同步把 w02 补回来（「恢复已删」入口走的就是这条）');
+}
+
 /* ---------- 内置技能 emoji 重同步（v1.8.2） ----------
    场景：用户数据里躺的是旧 emoji（🫁 / 🪞 —— 本机与老设备缺字形，界面显示成豆腐块）。
    定义表换掉 emoji 后必须能落到老数据上；同时**绝不能碰**用户可编辑的 name / sub / note，

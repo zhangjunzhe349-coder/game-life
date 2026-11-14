@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.13.0';
+  const APP_VERSION = '1.14.0';
   GL.VERSION = APP_VERSION;
 
   /* ---------- 顶部 HUD 读数 ----------
