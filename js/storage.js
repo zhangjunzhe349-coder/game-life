@@ -299,9 +299,10 @@
   }
 
   /* 衣橱单品库来自构建产物 js/wardrobe-data.js（由 tools/build-wardrobe.py 生成）。
-     UI 只消费不硬编码 —— 加衣服 = 重跑那个脚本，不用改任何 JS。
-     season / year 是**用户自己标的**（买入年份、冬夏），生成器不知道，所以默认 null，
-     由衣橱页的就地编辑写入 GL.state.avatar.wardrobe —— 后端重建清单也不会冲掉。 */
+     UI 只消费不硬编码 —— 加衣服 = 重跑那个脚本 + 重同步，不用改任何 JS。
+     season / year 原则上由**用户自己标**（买入年份、冬夏），就地编辑写入
+     GL.state.avatar.wardrobe —— 后端重建清单也不会冲掉；
+     生成器只对「一眼可断」的内置件预标 season（如 v1.12.0 五件冬装），year 一律 null。 */
   function wardrobeLib() {
     return (GL.WARDROBE_LIB || []).map((it) => ({
       id: it.id, name: it.name, slot: it.slot, cat: it.cat,
@@ -507,6 +508,19 @@
     });
   }
 
+  /* ---------- 内置衣橱单品的重同步（v1.12.0） ----------
+     av.wardrobe 是 load/迁移时从清单**快照**进 state 的 —— 清单后来新加的内置件
+     （w42–w46，花底照片抠图）老用户的数据里不会有。像 resyncBuiltinEmoji 一样
+     幂等补齐：只追加缺的 id（按清单顺序排在末尾），**绝不碰已有项** ——
+     用户改过的名字 / 季节 / 年份 / 穿着状态原样保留。schema 没变，不引版本迁移。 */
+  function resyncBuiltinWardrobe() {
+    const av = GL.state.avatar || (GL.state.avatar = {});
+    if (!Array.isArray(av.wardrobe)) av.wardrobe = wardrobeLib();
+    const have = {};
+    av.wardrobe.forEach((w) => { if (w && w.id) have[w.id] = true; });
+    wardrobeLib().forEach((it) => { if (!have[it.id]) av.wardrobe.push(it); });
+  }
+
   GL.load = function () {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(KEY)); } catch (e) { /* ignore */ }
@@ -522,6 +536,7 @@
       if (!GL.state.ui || !Array.isArray(GL.state.ui.attrCollapsed)) GL.state.ui = { attrCollapsed: [] };
     }
     resyncBuiltinEmoji();
+    resyncBuiltinWardrobe();
     GL.save();
   };
 
@@ -543,6 +558,7 @@
     }
     GL.state = merge(defaults(), obj);
     resyncBuiltinEmoji();
+    resyncBuiltinWardrobe();
     GL.save();
   };
 

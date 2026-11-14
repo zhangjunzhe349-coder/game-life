@@ -560,8 +560,8 @@ function check(ok, label, detail) {
      静态检查全都看不出「页面能看、点不动」，所以这一段**必须真点一遍**：
      点卡片 → 状态变 → 搭配框里真的多出一张图 → 再点一次能脱下 → 分类筛选生效。
      v1.8.1 起中央立绘移除，穿戴的可见证据从「立绘上的照片层」换成「搭配框里的 .wr-fig」。 */
-  check(S.wrLib === 41, '衣橱：单品库 41 件', `实际 ${S.wrLib}`);
-  check(S.wrCards === 41, '衣橱：41 件全部渲染成卡片', `实际 ${S.wrCards}`);
+  check(S.wrLib === 46, '衣橱：单品库 46 件（41 白底 + 5 花底抠图）', `实际 ${S.wrLib}`);
+  check(S.wrCards === 46, '衣橱：46 件全部渲染成卡片', `实际 ${S.wrCards}`);
   check(S.wrSlots === 4, '衣橱：搭配框 4 格（上衣 / 下装 / 鞋 / 包·配饰）', `实际 ${S.wrSlots}`);
   check(S.wrCats === 6, '衣橱：分类页签 6 个（全部 / 上衣 / 下装 / 鞋 / 包 / 配饰）', `实际 ${S.wrCats}`);
 
@@ -628,8 +628,9 @@ function check(ok, label, detail) {
     res.stateBag = window.GL.state.avatar.outfit.bag;
 
     /* 顶层季节筛选：夏装 / 冬装。
-       顺序上必须**先标季节再筛** —— 全新衣橱 41 件都未标注，
-       先点冬装拿到的是 0 件，测不出「筛选真的按季节过滤」这件事。 */
+       顺序上必须**先标季节再筛** —— 41 件白底图都未标注（v1.12.0 的 5 件
+       花底抠图预标：冬装 ×4 + 四季 ×1，四季同时命中两个季节筛选），
+       先点冬装拿到 5 件，测的仍是「按 id 精确过滤」：手标 w01 后应变 6 件。 */
     const sW0 = document.querySelector('.wr-chip[data-f-season="winter"]');
     if (sW0) { sW0.click(); await sleep(220); }
     res.nWinterBeforeTag = document.querySelectorAll('.wr-card').length;
@@ -682,16 +683,18 @@ function check(ok, label, detail) {
   check(wr && wr.wearTxt.indexOf('棕色羽绒服') !== -1,
     '衣橱：搭配框显示当前单品名', wr ? JSON.stringify(wr.wearTxt) : '');
   check(wr && wr.pOff === 2, '衣橱：再点一次能脱下（搭配框同步减少）', `实际 ${wr && wr.pOff}`);
-  check(wr && wr.nBottom === 8, '衣橱：筛选「下装」得 8 件', `实际 ${wr && wr.nBottom}`);
-  check(wr && wr.nAll === 41, '衣橱：切回「全部」恢复 41 件', `实际 ${wr && wr.nAll}`);
+  check(wr && wr.nBottom === 9, '衣橱：筛选「下装」得 9 件（v1.12.0 加 1 条牛仔裤）', `实际 ${wr && wr.nBottom}`);
+  check(wr && wr.nAll === 46, '衣橱：切回「全部」恢复 46 件', `实际 ${wr && wr.nAll}`);
 
   /* ---------- v1.11.0：包独立成类 / 季节筛选 / 就地编辑 ---------- */
   check(wr && wr.nBag === 3, '衣橱：「包」分类里 3 件（从配饰拆出来）', `实际 ${wr && wr.nBag}`);
   check(wr && wr.p4 === 4, '衣橱：再穿一只包 → 搭配框 4 张图（包·配饰一格）', `实际 ${wr && wr.p4}`);
   check(wr && wr.stateBag === 'w33',
     '衣橱：包写进独立的 outfit.bag 槽', wr ? JSON.stringify(wr.stateBag) : '无');
-  check(wr && wr.nWinterBeforeTag === 0,
-    '衣橱：未标注季节时「冬装」是空的（未标注不冒充任何一季）', `实际 ${wr && wr.nWinterBeforeTag}`);
+  /* season='all'（四季）按设计同时命中夏装与冬装筛选 —— 新加的牛仔裤就是 all，
+     所以「冬装」= 4 件预标冬装 + 1 件四季 = 5 件。 */
+  check(wr && wr.nWinterBeforeTag === 5,
+    '衣橱：冬装筛出 5 件（4 件预标冬装 + 1 件四季）', `实际 ${wr && wr.nWinterBeforeTag}`);
   check(wr && wr.editOpen === true, '衣橱：点 ✎ 就地展开编辑面板');
   check(wr && wr.editIsInline === true, '衣橱：编辑面板不是浮层（无 dialog / body.modal-open）');
   check(wr && wr.editKeptCard === true, '衣橱：展开编辑时卡片仍在（就地，不是被替换）');
@@ -700,8 +703,8 @@ function check(ok, label, detail) {
   check(wr && String(wr.editMeta).indexOf('冬装') !== -1,
     '衣橱：卡片上显示出季节标签', wr ? JSON.stringify(wr.editMeta) : '无');
   check(wr && wr.editClosed === true, '衣橱：编辑面板可收起');
-  check(wr && wr.seasonOn === true && wr.nWinter === 1,
-    '衣橱：标了冬装后，「冬装」筛选只剩这一件', `${wr && wr.nWinter} 件`);
+  check(wr && wr.seasonOn === true && wr.nWinter === 6,
+    '衣橱：手动标 w01 冬装后，「冬装」= 5 + 1 件手标 = 6 件', `${wr && wr.nWinter} 件`);
 
   /* ---------- 属性分组体系（v1.5.0） ---------- */
   check(S.attrCount === 16, '属性共 16 项（4 大类，含体温 / 总体力值 / 情绪）', `实际 ${S.attrCount}`);

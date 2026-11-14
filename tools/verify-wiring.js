@@ -332,7 +332,7 @@ if (tabCount === 5 && /data-tab="wardrobe"/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 22;   // v1.11.0：三个新属性 + 衣橱独立成页（storage/attributes/wardrobe/index/css 全动，数据 v4→v5）；前几轮：v16 顶栏/设置/技能形态 → v17 emoji 豆腐块 → v18 技能改就地展开 → v19 检查更新 → v20 每日必做 → v21 检查更新双判据；每轮都动了 css 或 js，资源有变就必须抬到同值
+const MIN_SW_VER = 23;   // v1.12.0：衣橱追加 5 件花底抠图（wardrobe-data 46 件 + storage 重同步）；前几轮：v18 技能就地展开 → v19 检查更新 → v20 每日必做 → v21 检查更新双判据 → v22 三项新属性+衣橱独立页；每轮都动了 js 或数据清单，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

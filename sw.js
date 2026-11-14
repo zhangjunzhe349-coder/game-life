@@ -81,8 +81,14 @@
       index.html（新增第五个页签 #panel-wardrobe）、css/style.css 都变了。
    ② 数据版本 v4 → v5：老用户的属性表 / 衣橱在这里补齐新字段，
       **不抬缓存版本号他们打开的还是旧页面 + 旧迁移代码**，看不到新属性。
+   v23 的改动（v1.12.0 · 衣橱追加 5 件花底抠图单品）：
+   ① js/wardrobe-data.js（41 → 46 件，w42–w46）、assets/wardrobe/w42–w46.webp
+      （图片本身不进 ASSETS，按需缓存）、tools/build-wardrobe.py（追加 EXTRA_ITEMS）。
+   ② js/storage.js 新增 resyncBuiltinWardrobe()：av.wardrobe 是加载时快照，
+      老用户数据里没有 w42–w46，load / 导入时幂等追加缺的 id。
+      **不抬缓存版本号老用户拿到的还是旧清单 + 旧重同步代码**，看不到这五件。
    ============================================================ */
-const CACHE = 'gamelife-v22';
+const CACHE = 'gamelife-v23';
 
 const ASSETS = [
   './',

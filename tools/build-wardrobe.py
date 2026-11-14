@@ -38,6 +38,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageChops
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                       # game-life/
 SRC_DIR = os.path.join(os.path.dirname(ROOT), '白底图')  # 项目根的白底图/
+EXTRA_DIR = os.path.join(os.path.dirname(ROOT), '新衣', '_cut')  # 花底照片抠好的 512 PNG
 OUT_CUT = os.path.join(ROOT, 'assets', 'wardrobe')
 OUT_WHT = os.path.join(ROOT, 'assets', 'wardrobe-white')
 OUT_MANIFEST = os.path.join(ROOT, 'js', 'wardrobe-data.js')
@@ -118,6 +119,23 @@ ITEMS = [
     (39, 'w39', '黑色休闲鞋',       'shoes',  'shoes'),
     (40, 'w40', '黑白帆布鞋',       'shoes',  'shoes'),
     (41, 'w41', '灰白跑鞋',         'shoes',  'shoes'),
+]
+
+
+# ============================================================
+# 追加单品（v1.12.0）：花床单上拍的照片，抠图走 tools/matte-ai.py
+# ------------------------------------------------------------
+# 这批不是白底图，泛洪吃白用不了，所以**先**用 ISNet 分割模型抠成
+# 512 透明 PNG（人工目检通过），再在这里只做「重编码 + 进清单」。
+# 顺序：python tools/matte-ai.py --src ../新衣 --out ../新衣/_cut
+#       python tools/build-wardrobe.py
+# (key, 名称, 部位, 季节, 买入年份)
+EXTRA_ITEMS = [
+    ('w42', '黑色印花夹克',     'top',    'winter', None),
+    ('w43', '棕黑格纹衬衫',     'top',    'winter', None),
+    ('w44', '灰黑抽象针织衫',   'top',    'winter', None),
+    ('w45', '深蓝水洗牛仔长裤', 'bottom', 'all',    None),
+    ('w46', '深棕连帽卫衣',     'top',    'winter', None),
 ]
 
 
@@ -310,7 +328,35 @@ def build(only=None, probe=False, white=False):
         nb = norm.getbbox() or (0, 0, CANVAS, CANVAS)
         manifest.append({'id': key, 'name': name, 'slot': slot, 'cat': box,
                          'color': dominant_color(norm), 'box': list(nb),
-                         'img': 'assets/wardrobe/%s.webp' % key})
+                         'img': 'assets/wardrobe/%s.webp' % key,
+                         'season': None, 'year': None})
+
+    # ---- 追加单品：直接吃已抠好的 512 透明 PNG ----
+    for key, name, slot, season, year in EXTRA_ITEMS:
+        idx = 42 + EXTRA_ITEMS.index((key, name, slot, season, year))
+        if only and idx not in only:
+            continue
+        src = os.path.join(EXTRA_DIR, key + '.png')
+        if not os.path.exists(src):
+            print(f"!! 缺 {src} —— 先跑 python tools/matte-ai.py")
+            continue
+        norm = Image.open(src).convert('RGBA').resize((CANVAS, CANVAS), Image.LANCZOS)
+        nb = norm.getbbox() or (0, 0, CANVAS, CANVAS)
+        if probe:
+            print(f"#{idx:<3} {key} {name:<16} 追加  框 {slot:<6} "
+                  f"主体 {nb[2]-nb[0]}x{nb[3]-nb[1]}")
+            continue
+        norm.save(os.path.join(OUT_CUT, key + '.webp'), 'WEBP',
+                  quality=WEBP_Q, method=WEBP_METHOD)
+        if white:
+            wht = Image.new('RGB', norm.size, (255, 255, 255))
+            wht.paste(norm, (0, 0), norm)
+            wht.save(os.path.join(OUT_WHT, key + '.jpg'), 'JPEG',
+                     quality=JPEG_Q, optimize=True, progressive=True)
+        manifest.append({'id': key, 'name': name, 'slot': slot, 'cat': slot,
+                         'color': dominant_color(norm), 'box': list(nb),
+                         'img': 'assets/wardrobe/%s.webp' % key,
+                         'season': season, 'year': year})
 
     if probe:
         return

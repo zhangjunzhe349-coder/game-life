@@ -220,9 +220,9 @@ const v1State = {
 
 /* ============ 用例 5：v3 → v4 衣橱换成真实照片素材 ============
    v3 的衣橱是 defaults 里那 4 件**假单品**（只有 color、没有图）。
-   用户 2026-09-26 要求整体换成他的 41 件白底图。
+   用户 2026-09-26 要求整体换成他的 41 件白底图；v1.12.0 又追加 5 件花底抠图（w42–w46）。
    这里守两条线：
-     ① 内置占位项必须被换掉，且换成的是 41 件、每件都带 color + box；
+     ① 内置占位项必须被换掉，且换成的是 46 件、每件都带 color + box；
      ② **用户自建的单品绝不能静默消失** —— 要留档到 avatar.legacyWardrobe。 */
 const v3State = {
   version: 3,
@@ -251,18 +251,24 @@ const v3State = {
   const A = GL.state;
 
   check(A.version === 5, '衣橱：version 升到 5（v4→v5 也跑过）', '实际 ' + A.version);
-  check(A.avatar.wardrobe.length === 41, '衣橱：换成 41 件照片素材', '实际 ' + A.avatar.wardrobe.length);
+  check(A.avatar.wardrobe.length === 46, '衣橱：换成 46 件照片素材（41 白底 + 5 花底抠图）', '实际 ' + A.avatar.wardrobe.length);
   check(A.avatar.wardrobe.every((w) => w.color && Array.isArray(w.box) && w.box.length === 4),
     '衣橱：每件都带 color 与 box（立绘贴图要用）');
-  check(A.avatar.wardrobe.filter((w) => w.slot === 'top').length === 24
-    && A.avatar.wardrobe.filter((w) => w.slot === 'bottom').length === 8
+  check(A.avatar.wardrobe.filter((w) => w.slot === 'top').length === 28
+    && A.avatar.wardrobe.filter((w) => w.slot === 'bottom').length === 9
     && A.avatar.wardrobe.filter((w) => w.slot === 'shoes').length === 5
     && A.avatar.wardrobe.filter((w) => w.slot === 'bag').length === 3
     && A.avatar.wardrobe.filter((w) => w.slot === 'accessory').length === 1,
-    '衣橱：分类数量 24/8/5/3/1（上/下/鞋/包/配饰）');
+    '衣橱：分类数量 28/9/5/3/1（上/下/鞋/包/配饰，v1.12.0 加 4 上 1 下）');
 
-  check(A.avatar.wardrobe.every((w) => w.season === null && w.year === null),
-    '衣橱：每件都补上 season / year（默认未标注，等用户自己标）');
+  const new5 = A.avatar.wardrobe.filter((w) => ['w42', 'w43', 'w44', 'w45', 'w46'].indexOf(w.id) !== -1);
+  const old41 = A.avatar.wardrobe.filter((w) => ['w42', 'w43', 'w44', 'w45', 'w46'].indexOf(w.id) === -1);
+  check(old41.length === 41 && old41.every((w) => w.season === null && w.year === null),
+    '衣橱：41 件白底图仍为 season / year 未标注（等用户自己标）');
+  check(new5.length === 5 && new5.every((w) => w.year === null)
+    && new5.filter((w) => w.season === 'winter').length === 4
+    && new5.filter((w) => w.season === 'all').length === 1,
+    '衣橱：5 件花底抠图已预标季节（冬装 ×4 · 四季 ×1），年份留空');
 
   const placeholderLeft = A.avatar.wardrobe.filter((w) => w.name === '白色T恤' || w.name === '黑框眼镜');
   check(placeholderLeft.length === 0, '衣橱：旧的 4 件占位单品已移除',
@@ -284,9 +290,44 @@ const v3State = {
 
   // 幂等：第二次 load 不能再搬一遍，也不能把留档清掉
   GL.load();
-  check(GL.state.version === 5 && GL.state.avatar.wardrobe.length === 41
+  check(GL.state.version === 5 && GL.state.avatar.wardrobe.length === 46
     && GL.state.avatar.legacyWardrobe.length === 1,
-    '衣橱：重复 load 幂等（不会二次迁移、留档不丢）');
+    '衣橱：重复 load 幂等（不会二次迁移、留档不丢、重同步不重复加件）');
+}
+
+/* ============ 用例 6.5：内置衣橱单品重同步（v1.12.0） ============
+   老用户（已是 v5）的数据里只有 41 件快照 —— 新内置件 w42–w46 必须在
+   load 时幂等追加，且**绝不碰**用户改过的名字 / 季节 / 年份 / 穿着状态。 */
+{
+  const { GL, store } = boot();
+  GL.load();                                     // 先落一份 v5 全量底稿（46 件）
+  const seeded = JSON.parse(JSON.stringify(GL.state));
+  // 模拟老用户：衣橱裁回 41 件 + 用户改过 w01 的名字、季节，正穿着 w02
+  seeded.avatar.wardrobe = seeded.avatar.wardrobe
+    .filter((w) => ['w42', 'w43', 'w44', 'w45', 'w46'].indexOf(w.id) === -1);
+  seeded.avatar.wardrobe[0].name = '我最爱的羽绒服';
+  seeded.avatar.wardrobe[0].season = 'summer';
+  seeded.avatar.wardrobe[1].name = '改过名的裤子';
+  seeded.avatar.outfit = { top: seeded.avatar.wardrobe[0].id, bottom: null, shoes: null, bag: null, accessory: null };
+  store['gamelife_state_v1'] = JSON.stringify(seeded);
+
+  GL.load();
+  const A = GL.state;
+  const ids = A.avatar.wardrobe.map((w) => w.id);
+  check(A.avatar.wardrobe.length === 46, '重同步：41 件快照补齐到 46 件', '实际 ' + A.avatar.wardrobe.length);
+  check(['w42', 'w43', 'w44', 'w45', 'w46'].every((id) => ids.indexOf(id) !== -1),
+    '重同步：w42–w46 五件全部追加到位');
+  check(ids.slice(-5).join(',') === 'w42,w43,w44,w45,w46',
+    '重同步：新件按清单顺序排在末尾');
+  check(A.avatar.wardrobe[0].name === '我最爱的羽绒服' && A.avatar.wardrobe[0].season === 'summer',
+    '重同步：用户改过的名字 / 季节原样保留');
+  check(A.avatar.wardrobe[1].name === '改过名的裤子',
+    '重同步：用户改过的第二件也保留');
+  check(A.avatar.outfit.top === seeded.avatar.wardrobe[0].id,
+    '重同步：穿着状态不受影响');
+  GL.load();
+  check(GL.state.avatar.wardrobe.length === 46,
+    '重同步：重复 load 幂等（不会重复追加）');
 }
 
 /* ---------- 内置技能 emoji 重同步（v1.8.2） ----------

@@ -1,7 +1,7 @@
 /* 由 tools/build-wardrobe.py 生成，请勿手改。
    ⚠ 必须在 js/storage.js **之后**引入 —— GL 是 storage.js 建的，
      本文件是裸 `GL.WARDROBE_LIB = …`，排在前面会 ReferenceError。
-   单品清单：id / name / slot(top|bottom|shoes|accessory) / cat(归一框)
+   单品清单：id / name / slot(top|bottom|shoes|bag|accessory) / cat(归一框)
              color(主体平均色，矢量立绘用) / box(主体在 512 画布里的外接框)
              img(单品的完整相对路径 —— **必须是字面量**，
                  tools/build-dist.js 靠扫字面量收集产物，拼接的路径它看不见)
@@ -19,7 +19,9 @@ GL.WARDROBE_LIB = [
       468,
       493
     ],
-    "img": "assets/wardrobe/w01.webp"
+    "img": "assets/wardrobe/w01.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w02",
@@ -33,7 +35,9 @@ GL.WARDROBE_LIB = [
       442,
       493
     ],
-    "img": "assets/wardrobe/w02.webp"
+    "img": "assets/wardrobe/w02.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w03",
@@ -47,7 +51,9 @@ GL.WARDROBE_LIB = [
       433,
       493
     ],
-    "img": "assets/wardrobe/w03.webp"
+    "img": "assets/wardrobe/w03.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w04",
@@ -61,7 +67,9 @@ GL.WARDROBE_LIB = [
       454,
       493
     ],
-    "img": "assets/wardrobe/w04.webp"
+    "img": "assets/wardrobe/w04.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w05",
@@ -75,7 +83,9 @@ GL.WARDROBE_LIB = [
       451,
       493
     ],
-    "img": "assets/wardrobe/w05.webp"
+    "img": "assets/wardrobe/w05.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w06",
@@ -89,7 +99,9 @@ GL.WARDROBE_LIB = [
       473,
       493
     ],
-    "img": "assets/wardrobe/w06.webp"
+    "img": "assets/wardrobe/w06.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w07",
@@ -103,7 +115,9 @@ GL.WARDROBE_LIB = [
       394,
       488
     ],
-    "img": "assets/wardrobe/w07.webp"
+    "img": "assets/wardrobe/w07.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w08",
@@ -117,7 +131,9 @@ GL.WARDROBE_LIB = [
       438,
       493
     ],
-    "img": "assets/wardrobe/w08.webp"
+    "img": "assets/wardrobe/w08.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w09",
@@ -131,7 +147,9 @@ GL.WARDROBE_LIB = [
       455,
       493
     ],
-    "img": "assets/wardrobe/w09.webp"
+    "img": "assets/wardrobe/w09.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w10",
@@ -145,7 +163,9 @@ GL.WARDROBE_LIB = [
       408,
       493
     ],
-    "img": "assets/wardrobe/w10.webp"
+    "img": "assets/wardrobe/w10.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w11",
@@ -159,7 +179,9 @@ GL.WARDROBE_LIB = [
       446,
       493
     ],
-    "img": "assets/wardrobe/w11.webp"
+    "img": "assets/wardrobe/w11.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w12",
@@ -173,7 +195,9 @@ GL.WARDROBE_LIB = [
       442,
       493
     ],
-    "img": "assets/wardrobe/w12.webp"
+    "img": "assets/wardrobe/w12.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w13",
@@ -187,7 +211,9 @@ GL.WARDROBE_LIB = [
       427,
       493
     ],
-    "img": "assets/wardrobe/w13.webp"
+    "img": "assets/wardrobe/w13.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w14",
@@ -201,7 +227,9 @@ GL.WARDROBE_LIB = [
       444,
       493
     ],
-    "img": "assets/wardrobe/w14.webp"
+    "img": "assets/wardrobe/w14.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w15",
@@ -215,7 +243,9 @@ GL.WARDROBE_LIB = [
       479,
       470
     ],
-    "img": "assets/wardrobe/w15.webp"
+    "img": "assets/wardrobe/w15.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w16",
@@ -229,7 +259,9 @@ GL.WARDROBE_LIB = [
       461,
       493
     ],
-    "img": "assets/wardrobe/w16.webp"
+    "img": "assets/wardrobe/w16.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w17",
@@ -243,7 +275,9 @@ GL.WARDROBE_LIB = [
       469,
       493
     ],
-    "img": "assets/wardrobe/w17.webp"
+    "img": "assets/wardrobe/w17.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w18",
@@ -257,7 +291,9 @@ GL.WARDROBE_LIB = [
       436,
       492
     ],
-    "img": "assets/wardrobe/w18.webp"
+    "img": "assets/wardrobe/w18.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w19",
@@ -271,7 +307,9 @@ GL.WARDROBE_LIB = [
       383,
       488
     ],
-    "img": "assets/wardrobe/w19.webp"
+    "img": "assets/wardrobe/w19.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w20",
@@ -285,7 +323,9 @@ GL.WARDROBE_LIB = [
       424,
       493
     ],
-    "img": "assets/wardrobe/w20.webp"
+    "img": "assets/wardrobe/w20.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w21",
@@ -299,7 +339,9 @@ GL.WARDROBE_LIB = [
       426,
       488
     ],
-    "img": "assets/wardrobe/w21.webp"
+    "img": "assets/wardrobe/w21.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w22",
@@ -313,7 +355,9 @@ GL.WARDROBE_LIB = [
       384,
       487
     ],
-    "img": "assets/wardrobe/w22.webp"
+    "img": "assets/wardrobe/w22.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w23",
@@ -327,7 +371,9 @@ GL.WARDROBE_LIB = [
       406,
       488
     ],
-    "img": "assets/wardrobe/w23.webp"
+    "img": "assets/wardrobe/w23.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w24",
@@ -341,7 +387,9 @@ GL.WARDROBE_LIB = [
       435,
       493
     ],
-    "img": "assets/wardrobe/w24.webp"
+    "img": "assets/wardrobe/w24.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w25",
@@ -355,7 +403,9 @@ GL.WARDROBE_LIB = [
       424,
       493
     ],
-    "img": "assets/wardrobe/w25.webp"
+    "img": "assets/wardrobe/w25.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w26",
@@ -369,7 +419,9 @@ GL.WARDROBE_LIB = [
       377,
       489
     ],
-    "img": "assets/wardrobe/w26.webp"
+    "img": "assets/wardrobe/w26.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w27",
@@ -383,7 +435,9 @@ GL.WARDROBE_LIB = [
       447,
       493
     ],
-    "img": "assets/wardrobe/w27.webp"
+    "img": "assets/wardrobe/w27.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w28",
@@ -397,7 +451,9 @@ GL.WARDROBE_LIB = [
       385,
       489
     ],
-    "img": "assets/wardrobe/w28.webp"
+    "img": "assets/wardrobe/w28.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w29",
@@ -411,7 +467,9 @@ GL.WARDROBE_LIB = [
       427,
       493
     ],
-    "img": "assets/wardrobe/w29.webp"
+    "img": "assets/wardrobe/w29.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w30",
@@ -425,7 +483,9 @@ GL.WARDROBE_LIB = [
       418,
       493
     ],
-    "img": "assets/wardrobe/w30.webp"
+    "img": "assets/wardrobe/w30.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w31",
@@ -439,7 +499,9 @@ GL.WARDROBE_LIB = [
       415,
       493
     ],
-    "img": "assets/wardrobe/w31.webp"
+    "img": "assets/wardrobe/w31.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w32",
@@ -453,7 +515,9 @@ GL.WARDROBE_LIB = [
       421,
       489
     ],
-    "img": "assets/wardrobe/w32.webp"
+    "img": "assets/wardrobe/w32.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w33",
@@ -467,7 +531,9 @@ GL.WARDROBE_LIB = [
       384,
       478
     ],
-    "img": "assets/wardrobe/w33.webp"
+    "img": "assets/wardrobe/w33.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w34",
@@ -481,7 +547,9 @@ GL.WARDROBE_LIB = [
       364,
       480
     ],
-    "img": "assets/wardrobe/w34.webp"
+    "img": "assets/wardrobe/w34.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w35",
@@ -495,7 +563,9 @@ GL.WARDROBE_LIB = [
       412,
       480
     ],
-    "img": "assets/wardrobe/w35.webp"
+    "img": "assets/wardrobe/w35.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w36",
@@ -509,7 +579,9 @@ GL.WARDROBE_LIB = [
       483,
       341
     ],
-    "img": "assets/wardrobe/w36.webp"
+    "img": "assets/wardrobe/w36.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w37",
@@ -523,7 +595,9 @@ GL.WARDROBE_LIB = [
       479,
       342
     ],
-    "img": "assets/wardrobe/w37.webp"
+    "img": "assets/wardrobe/w37.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w38",
@@ -537,7 +611,9 @@ GL.WARDROBE_LIB = [
       478,
       336
     ],
-    "img": "assets/wardrobe/w38.webp"
+    "img": "assets/wardrobe/w38.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w39",
@@ -551,7 +627,9 @@ GL.WARDROBE_LIB = [
       478,
       349
     ],
-    "img": "assets/wardrobe/w39.webp"
+    "img": "assets/wardrobe/w39.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w40",
@@ -565,7 +643,9 @@ GL.WARDROBE_LIB = [
       478,
       338
     ],
-    "img": "assets/wardrobe/w40.webp"
+    "img": "assets/wardrobe/w40.webp",
+    "season": null,
+    "year": null
   },
   {
     "id": "w41",
@@ -579,6 +659,88 @@ GL.WARDROBE_LIB = [
       478,
       347
     ],
-    "img": "assets/wardrobe/w41.webp"
+    "img": "assets/wardrobe/w41.webp",
+    "season": null,
+    "year": null
+  },
+  {
+    "id": "w42",
+    "name": "黑色印花夹克",
+    "slot": "top",
+    "cat": "top",
+    "color": "#1c1b19",
+    "box": [
+      30,
+      22,
+      481,
+      489
+    ],
+    "img": "assets/wardrobe/w42.webp",
+    "season": "winter",
+    "year": null
+  },
+  {
+    "id": "w43",
+    "name": "棕黑格纹衬衫",
+    "slot": "top",
+    "cat": "top",
+    "color": "#20252b",
+    "box": [
+      30,
+      28,
+      481,
+      483
+    ],
+    "img": "assets/wardrobe/w43.webp",
+    "season": "winter",
+    "year": null
+  },
+  {
+    "id": "w44",
+    "name": "灰黑抽象针织衫",
+    "slot": "top",
+    "cat": "top",
+    "color": "#7d8086",
+    "box": [
+      40,
+      15,
+      471,
+      496
+    ],
+    "img": "assets/wardrobe/w44.webp",
+    "season": "winter",
+    "year": null
+  },
+  {
+    "id": "w45",
+    "name": "深蓝水洗牛仔长裤",
+    "slot": "bottom",
+    "cat": "bottom",
+    "color": "#5f5245",
+    "box": [
+      135,
+      20,
+      377,
+      491
+    ],
+    "img": "assets/wardrobe/w45.webp",
+    "season": "all",
+    "year": null
+  },
+  {
+    "id": "w46",
+    "name": "深棕连帽卫衣",
+    "slot": "top",
+    "cat": "top",
+    "color": "#343435",
+    "box": [
+      71,
+      15,
+      440,
+      496
+    ],
+    "img": "assets/wardrobe/w46.webp",
+    "season": "winter",
+    "year": null
   }
 ];
