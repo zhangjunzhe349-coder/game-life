@@ -324,6 +324,43 @@ const wMiss = wTags.filter(([tag]) => wardrobeJs.indexOf(tag) === -1);
 if (!wMiss.length) ok.push('衣橱页：季节筛选 + 类别 / 季节 / 年份 三个编辑口都在');
 else problems.push(`衣橱页缺少：${wMiss.map((x) => x[1]).join('、')}`);
 
+/* ---------- 6e-1. 衣橱「＋ 添加单品」（v1.13.0） ----------
+   用户 2026-11-14：「点击电子衣橱界面的『添加』按钮……上传照片之后就能录入，
+   然后它和编辑信息能同时编辑。」
+   这条链最容易在细节上悄悄坏掉，所以逐环钉死：
+     ① 入口按钮存在且**就地展开**（项目一贯不要浮层）
+     ② 文件输入 accept 限 PNG（相册里随手选张实景照就会是一块白方块）
+     ③ 导入时真的扫 alpha 通道（后缀叫 .png 不代表透明底）
+     ④ 存图走 canvas → dataURL（不联网、不上传）
+     ⑤ 新件 id 以 u 开头，不会被 resyncBuiltinWardrobe() 当成内置件覆盖
+     ⑥ 保存前有 localStorage 体积预检（写满时 GL.save 只弹一句话，更让人懵） */
+const wAdd = [
+  ['data-add-open', '「＋ 添加单品」入口'],
+  ['data-add-input', '选图用的 file 输入'],
+  ['data-add-save', '「保存到衣橱」'],
+  ['data-add-slot', '添加时的类别选择'],
+  ['data-add-season', '添加时的季节选择'],
+  ['data-add-year', '添加时的年份选择'],
+  ['accept="image/png', 'file 输入限定 PNG'],
+  ['alphaInfo(', '导入时扫 alpha 通道判透明底'],
+  ['toDataURL(', '图片编码成 dataURL（本地存储，不联网）'],
+  ["id: 'u' + Date.now()", '新件 id 用 u 前缀（与内置 wNN 分开）'],
+  ['STORE_GUARD', 'localStorage 体积预检'],
+];
+const wAddMiss = wAdd.filter(([tag]) => wardrobeJs.indexOf(tag) === -1);
+if (!wAddMiss.length) {
+  ok.push('衣橱：添加单品整条链齐全（入口 / 选图限 PNG / alpha 判透明底 / dataURL 存储 / u 前缀 id / 体积预检）');
+} else {
+  problems.push(`衣橱「添加单品」缺环：${wAddMiss.map((x) => x[1]).join('、')}`);
+}
+/* 添加面板必须就地展开 —— 与 ✎ 编辑同理，用户对浮窗的态度是「不要浮窗，直接展开」 */
+if (/class="wr-addbox"/.test(wardrobeJs) && !/role="dialog"/.test(wardrobeJs)
+  && !/modal-open/.test(wardrobeJs)) {
+  ok.push('衣橱：添加面板是就地展开（无 dialog / 无 body.modal-open）');
+} else {
+  problems.push('衣橱添加面板退化成了浮层（出现 dialog / modal-open），与「不要浮窗」的既定要求冲突');
+}
+
 const tabCount = (html.match(/data-tab="/g) || []).length;
 if (tabCount === 5 && /data-tab="wardrobe"/.test(html)) {
   ok.push('底部导航 5 个页签（总览 / 技能 / 衣橱 / 生命 / 设置）');
@@ -332,7 +369,7 @@ if (tabCount === 5 && /data-tab="wardrobe"/.test(html)) {
 }
 
 const swVer = (sw.match(/gamelife-v(\d+)/) || [])[1];
-const MIN_SW_VER = 23;   // v1.12.0：衣橱追加 5 件花底抠图（wardrobe-data 46 件 + storage 重同步）；前几轮：v18 技能就地展开 → v19 检查更新 → v20 每日必做 → v21 检查更新双判据 → v22 三项新属性+衣橱独立页；每轮都动了 js 或数据清单，资源有变就必须抬到同值
+const MIN_SW_VER = 24;   // v1.13.0：衣橱「＋ 添加单品」（上传透明底 PNG 入橱）；前几轮：v18 技能就地展开 → v19 检查更新 → v20 每日必做 → v21 检查更新双判据 → v22 三项新属性+衣橱独立页 → v23 衣橱追加 5 件花底抠图；每轮都动了 js 或数据清单，资源有变就必须抬到同值
 if (swVer && Number(swVer) >= MIN_SW_VER) ok.push(`sw.js 缓存版本已升到 v${swVer}（≥ v${MIN_SW_VER}）`);
 else problems.push(`sw.js 缓存版本过低（当前 v${swVer || '?'}，需 ≥ v${MIN_SW_VER}）—— 改了资源必须升版，否则用户浏览器里的旧缓存不会刷新，页面会停留在旧版本`);
 

@@ -706,6 +706,145 @@ function check(ok, label, detail) {
   check(wr && wr.seasonOn === true && wr.nWinter === 6,
     '衣橱：手动标 w01 冬装后，「冬装」= 5 + 1 件手标 = 6 件', `${wr && wr.nWinter} 件`);
 
+  /* ---------- v1.13.0：衣橱「＋ 添加单品」 ----------
+     这一段必须**真走一遍上传**：静态校验只能证明「代码里有这几个属性」，
+     证明不了 file → Image → canvas → dataURL → 入橱 → 落盘 这条链跑得通。
+     造图用 canvas 现画（不依赖任何外部文件）：四周全透明、中间一块实色，
+     正好是「透明底衣服」的最小等价物。 */
+  const addw = await ev(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const tab = document.querySelector('.tab[data-tab="wardrobe"]');
+    if (tab) { tab.click(); await sleep(300); }
+    const res = { };
+
+    /* 一张带透明通道的 PNG */
+    const mkPng = async (transparent) => {
+      const c = document.createElement('canvas');
+      c.width = 400; c.height = 400;
+      const g = c.getContext('2d');
+      if (!transparent) { g.fillStyle = '#ffffff'; g.fillRect(0, 0, 400, 400); }
+      g.fillStyle = '#c0392b';
+      g.fillRect(100, 60, 200, 280);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      return new File([blob], 'test-shirt.png', { type: 'image/png' });
+    };
+    const pick = async (file) => {
+      const inp = document.querySelector('[data-add-input]');
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      inp.files = dt.files;
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(700);
+    };
+
+    res.before = window.GL.state.avatar.wardrobe.length;
+    res.hasBtn = !!document.querySelector('[data-add-open]');
+    const open = document.querySelector('[data-add-open]');
+    if (open) { open.click(); await sleep(260); }
+    res.hasBox = !!document.querySelector('.wr-addbox');
+    res.inline = !!document.querySelector('.wr-addbox')
+      && !document.querySelector('.wr-addbox [role="dialog"]')
+      && !document.body.classList.contains('modal-open');
+    res.countKept = document.querySelectorAll('.wr-card').length > 0;
+
+    /* ① 不透明的 PNG 必须被拒（后缀对、内容不对） */
+    await pick(await mkPng(false));
+    res.opaqueMsg = (document.querySelector('[data-add-msg]') || {}).textContent || '';
+    res.opaqueNoPreview = !document.querySelector('.wr-add-prev');
+
+    /* ② 非 PNG（这里用 JPEG 的 MIME 造）必须被拒 */
+    const jpg = new File([new Blob([new Uint8Array([255, 216, 255, 217])])], 'x.jpg', { type: 'image/jpeg' });
+    await pick(jpg);
+    res.jpgMsg = (document.querySelector('[data-add-msg]') || {}).textContent || '';
+
+    /* ③ 合规的透明底 PNG：预览出来 → 改名 + 改成下装 → 保存 */
+    await pick(await mkPng(true));
+    res.preview = !!document.querySelector('.wr-add-prev');
+    const nm = document.querySelector('[data-add-name]');
+    nm.value = '测试透明衫';
+    nm.dispatchEvent(new Event('input', { bubbles: true }));
+    const sl = document.querySelector('[data-add-slot]');
+    sl.value = 'bottom';
+    sl.dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(250);
+    const save = document.querySelector('[data-add-save]');
+    if (save) { save.click(); await sleep(600); }
+
+    const list = window.GL.state.avatar.wardrobe;
+    const it = list.filter((w) => String(w.id).charAt(0) === 'u')[0] || null;
+    res.after = list.length;
+    res.saved = !!it;
+    res.name = it ? it.name : '';
+    res.slot = it ? it.slot : '';
+    res.isData = !!(it && String(it.img).indexOf('data:image/') === 0);
+    res.boxOk = !!(it && Array.isArray(it.box) && it.box.length === 4
+      && it.box[0] >= 0 && it.box[1] >= 0 && it.box[2] > 0 && it.box[3] > 0
+      && it.box[2] <= 512 && it.box[3] <= 512);
+    res.cardShown = !!document.querySelector('.wr-card[data-item="' + (it ? it.id : '-') + '"]');
+    res.panelClosed = !document.querySelector('.wr-addbox');
+
+    /* 真落盘了没有：直接翻 localStorage（不看内存里的 state） */
+    res.persisted = false;
+    if (it) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const v = localStorage.getItem(localStorage.key(i)) || '';
+        if (v.indexOf('"wardrobe"') !== -1 && v.indexOf(it.id) !== -1) res.persisted = true;
+      }
+    }
+
+    /* ④ 重同步不能把它当内置件冲掉：load 会跑 resyncBuiltinWardrobe() */
+    window.GL.load();
+    window.GL.renderWardrobe();
+    await sleep(300);
+    res.surviveResync = window.GL.state.avatar.wardrobe.some((w) => String(w.id).charAt(0) === 'u');
+
+    /* ⑤ 自己加的单品能删（删完回到添加前的件数） */
+    const ownId = (window.GL.state.avatar.wardrobe.filter((w) => String(w.id).charAt(0) === 'u')[0] || {}).id;
+    const ebtn = document.querySelector('.wr-edit[data-edit="' + ownId + '"]');
+    if (ebtn) { ebtn.click(); await sleep(250); }
+    res.hasDel = !!document.querySelector('[data-edit-del]');
+    const realConfirm = window.confirm;
+    window.confirm = () => true;
+    const del = document.querySelector('[data-edit-del]');
+    if (del) { del.click(); await sleep(400); }
+    window.confirm = realConfirm;
+    res.afterDel = window.GL.state.avatar.wardrobe.length;
+    res.ownGone = !window.GL.state.avatar.wardrobe.some((w) => String(w.id).charAt(0) === 'u');
+
+    /* 内置件**不该**有删除按钮（删了下次加载也会被重同步补回来，等于骗人） */
+    const b = document.querySelector('.wr-edit[data-edit="w02"]');
+    if (b) { b.click(); await sleep(220); }
+    res.builtinNoDel = !document.querySelector('[data-edit-del]');
+    const cb = document.querySelector('[data-edit-close]');
+    if (cb) { cb.click(); await sleep(200); }
+    return res;
+  })()`);
+
+  check(addw && addw.hasBtn === true, '衣橱：有「＋ 添加单品」入口');
+  check(addw && addw.hasBox === true, '衣橱：点「＋」就地展开添加面板');
+  check(addw && addw.inline === true, '衣橱：添加面板不是浮层（无 dialog / modal-open）');
+  check(addw && addw.countKept === true, '衣橱：展开添加面板时原有卡片仍在（就地，不是被替换）');
+  check(addw && /透明/.test(addw.opaqueMsg) && addw.opaqueNoPreview === true,
+    '衣橱：不透明的 PNG 被拒（扫 alpha，不只看后缀）', addw ? JSON.stringify(addw.opaqueMsg) : '');
+  check(addw && /PNG/.test(addw.jpgMsg), '衣橱：非 PNG 被拒', addw ? JSON.stringify(addw.jpgMsg) : '');
+  check(addw && addw.preview === true, '衣橱：选好透明底 PNG 后出预览');
+  check(addw && addw.saved === true && addw.after === addw.before + 1,
+    '衣橱：保存后真的多了一件（state 里能找到 u 开头的单品）',
+    addw ? `${addw.before} → ${addw.after}` : '无');
+  check(addw && addw.name === '测试透明衫' && addw.slot === 'bottom',
+    '衣橱：添加时填的名称 / 类别一起写进 state', addw ? `${addw.name} / ${addw.slot}` : '无');
+  check(addw && addw.isData === true, '衣橱：新件图片是 dataURL（本地存储，不联网）');
+  check(addw && addw.boxOk === true, '衣橱：新件带 512 画布内的外接框（与内置件同格式）',
+    addw ? JSON.stringify(addw.box) : '');
+  check(addw && addw.cardShown === true, '衣橱：保存后卡片立刻出现在网格里');
+  check(addw && addw.panelClosed === true, '衣橱：保存后添加面板自动收起');
+  check(addw && addw.persisted === true, '衣橱：新件真的写进了 localStorage（不是只在内存里）');
+  check(addw && addw.surviveResync === true, '衣橱：重新加载后自建单品还在（重同步只补内置件，不冲用户件）');
+  check(addw && addw.hasDel === true && addw.ownGone === true && addw.afterDel === addw.before,
+    '衣橱：自建单品可删除，删完回到添加前的件数',
+    addw ? `${addw.after} → ${addw.afterDel}` : '无');
+  check(addw && addw.builtinNoDel === true, '衣橱：内置件没有删除按钮（删了也会被重同步补回来）');
+
   /* ---------- 属性分组体系（v1.5.0） ---------- */
   check(S.attrCount === 16, '属性共 16 项（4 大类，含体温 / 总体力值 / 情绪）', `实际 ${S.attrCount}`);
   check(S.skillCount === 13, '技能共 13 项（5 大类）', `实际 ${S.skillCount}`);
@@ -760,6 +899,37 @@ function check(ok, label, detail) {
     const pw0 = path.join(ROOT, 'tools', 'browser-shot-wardrobe.png');
     fs.writeFileSync(pw0, Buffer.from(sw0.data, 'base64'));
     shotPaths.push(pw0);
+
+    /* v1.13.0：添加面板单独出图 —— 上传块与四个字段挤不挤，只有图能判断。
+       拍完立刻收起，别影响后面的总览截图。 */
+    const rAdd = await ev(`(async () => {
+      const b = document.querySelector('[data-add-open]');
+      if (b) { b.click(); await new Promise((r) => setTimeout(r, 320)); }
+      const box = document.querySelector('.wr-addbox');
+      if (!box) return null;
+      box.scrollIntoView({ block: 'center' });
+      await new Promise((r) => setTimeout(r, 300));
+      const r = box.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    })()`);
+    if (rAdd && rAdd.w > 100) {
+      const sAdd = await send('Page.captureScreenshot', {
+        format: 'png',
+        clip: {
+          x: Math.max(0, rAdd.x - 12), y: Math.max(0, rAdd.y - 12),
+          width: rAdd.w + 24, height: rAdd.h + 24, scale: 1.6
+        },
+      });
+      const pAdd = path.join(ROOT, 'tools', 'browser-shot-wardrobe-add.png');
+      fs.writeFileSync(pAdd, Buffer.from(sAdd.data, 'base64'));
+      shotPaths.push(pAdd);
+    }
+    await ev(`(() => {
+      const c = document.querySelector('[data-add-close]');
+      if (c) c.click();
+      return true;
+    })()`);
+    await new Promise((r) => setTimeout(r, 300));
 
     /* 第二张必须是总览页 —— 切回 hud，否则跟衣橱那张一模一样 */
     await ev(`(async () => {

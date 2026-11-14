@@ -819,6 +819,47 @@ b { font-weight: 700; }
 .wr-eb-row > div { display: flex; flex-direction: column; gap: 4px; flex: 1 1 96px; min-width: 0; }
 .wr-eb-row select { width: 100%; }
 .wr-eb-note { font-size: var(--fs-2xs); color: var(--faint); }
+.wr-eb-tools { display: flex; align-items: center; gap: var(--s2); }
+
+/* ---------- 添加单品（v1.13.0） ----------
+   入口是网格上方那条工具行里的「＋ 添加单品」，点开后**就地展开**在筛选与分类之间
+   （与 ✎ 编辑面板同一套逻辑：不弹浮层）。 */
+.wr-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.wr-add {
+  display: inline-flex; align-items: center;
+  min-height: 30px; padding: 0 var(--s3);
+  border-radius: var(--r-pill); border: 1px dashed var(--line-strong);
+  background: transparent; color: var(--muted);
+  font-size: var(--fs-2xs); letter-spacing: 0.06em; cursor: pointer;
+  transition: all var(--dur-fast) ease-out;
+}
+.wr-add:hover, .wr-add.on { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+
+.wr-addbox {
+  display: flex; flex-direction: column; gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--accent-line); border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.wr-add-row { display: flex; gap: var(--s3); align-items: flex-start; }
+.wr-add-fields { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; }
+/* 上传区：虚线方块，选好图后直接把预览铺在里面（不再显示提示字） */
+.wr-drop {
+  flex: none; width: 104px; height: 104px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; overflow: hidden;
+  border-radius: var(--r-sm); border: 1px dashed var(--line-strong);
+  background: var(--surface-2); color: var(--faint); cursor: pointer;
+  transition: all var(--dur-fast) ease-out;
+}
+.wr-drop:hover { border-color: var(--accent-line); color: var(--accent); }
+.wr-drop.has { border-style: solid; border-color: var(--accent-line); background: var(--surface-3); }
+.wr-drop-tip { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 20px; line-height: 1; }
+.wr-drop-tip i { font-style: normal; font-size: var(--fs-2xs); letter-spacing: 0.04em; }
+.wr-add-prev { width: 100%; height: 100%; object-fit: contain; }
+.wr-add-foot { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.wr-add-msg { font-size: var(--fs-2xs); color: var(--muted); }
+.wr-add-msg.err { color: var(--danger); }
 
 /* 手机端：左搭配右选择（用户指定），左侧压缩到 112px，选择区两列 */
 @media (max-width: 900px) {
@@ -840,6 +881,10 @@ b { font-weight: 700; }
   .wr-flabel { width: 26px; }
   .wr-chip { min-height: 28px; }
   .wr-eb-row { gap: var(--s2); }
+  /* 手机上横向排不下（左栏才 112px，上传块 + 三个下拉会挤成豆腐块）→ 竖排 */
+  .wr-add-row { flex-direction: column; }
+  .wr-drop { width: 100%; height: 112px; }
+  .wr-tools { flex-wrap: wrap; }
 }
 
 /* ============ 卡片（技能页 / 生命页 / 设置页共用） ============ */
